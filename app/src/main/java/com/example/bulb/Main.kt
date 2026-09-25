@@ -394,6 +394,10 @@ private fun HelpDialog(onDismiss: () -> Unit) {
 private fun KeyDialog(onDismiss: () -> Unit) {
     val ctx = LocalContext.current
     var net by remember { mutableStateOf("") }
+    var app by remember { mutableStateOf("") }
+    var dev by remember { mutableStateOf("") }
+    var mac by remember { mutableStateOf("") }
+    var uni by remember { mutableStateOf("0x0002") }
     val filePicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
@@ -404,17 +408,17 @@ private fun KeyDialog(onDismiss: () -> Unit) {
             if (o.optString("format") == "abulb-keys-v1") {
                 net = o.getString("netKey"); app = o.getString("appKey"); dev = o.getString("deviceKey")
                 mac = o.optString("mac").uppercase()
-                if (o.has("unicast")) uni = String.format("0x%04X", o.getInt("unicast"))
+                if (o.has("bulbUnicast")) {
+                    val u = o.get("bulbUnicast")
+                    uni = if (u is Number) String.format("0x%04X", u.toInt())
+                          else u.toString().lowercase().removePrefix("0x").let { "0x$it" }
+                }
                 Toast.makeText(ctx, "Keys loaded — tap Save", Toast.LENGTH_SHORT).show()
             } else Toast.makeText(ctx, "Not an aBulb key file", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
             Toast.makeText(ctx, "Bad file: ${e.message}", Toast.LENGTH_SHORT).show()
         }
-    }
-    var app by remember { mutableStateOf("") }
-    var dev by remember { mutableStateOf("") }
-    var mac by remember { mutableStateOf("") }
-    var uni by remember { mutableStateOf("0x0002") }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = NightCard,

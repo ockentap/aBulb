@@ -43,7 +43,7 @@ provisioning state and is required after some failures.
 2. Install it (allow "install from unknown sources" when prompted).
 3. Open the app → tap **Keys** → paste the 3 keys by hand, or tap **Import file**
    and pick an `abulb-keys.json` (`{"format":"abulb-keys-v1", "netKey":..., "appKey":...,
-   "deviceKey":..., "mac":..., "unicast":...}`). Optionally add the bulb's MAC and
+   "deviceKey":..., "mac":..., "bulbUnicast":...}`). Optionally add the bulb's MAC and
    unicast address (defaults to `0x0002`) → Save → restart the app.
 4. Power-cycle the bulb and make sure it's powered (it advertises the mesh proxy
    only while powered).
