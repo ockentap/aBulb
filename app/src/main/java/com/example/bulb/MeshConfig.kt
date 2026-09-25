@@ -7,6 +7,7 @@ object MeshConfig {
     const val PROVISIONER_NAME = "phone-provisioner"
     const val PHONE_UNICAST = 0x0003          // address reserved for the phone
     const val BULB_UNICAST = 0x0002           // default, overridden per user
+    const val BULB_UUID = "00000000000000000000000000000000"  // required field only; not used by transport
     const val NET_KEY_INDEX = 0x0000
     const val APP_KEY_INDEX = 0x0000
 

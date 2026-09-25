@@ -87,7 +87,9 @@ object CdbBuilder {
             .put("appKeys", appKeysArr)
             .put("elements", elements)
 
-        o.put("nodes", JSONArray().put(bulbNode).put(phoneNode))
+        val nodesArr = JSONArray()
+        nodesArr.put(bulbNode as Any).put(phoneNode as Any)
+        o.put("nodes", nodesArr)
 
         o.put("groups", JSONArray())
         o.put("scenes", JSONArray())

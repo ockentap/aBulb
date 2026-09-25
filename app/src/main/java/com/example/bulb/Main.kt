@@ -15,11 +15,14 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.LinkOff
+import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -78,6 +81,7 @@ fun App(crash: String? = null, vm: MeshViewModel = viewModel()) {
     val level by vm.brightness.collectAsState()
     val status by vm.statusText.collectAsState()
     var showKeys by remember { mutableStateOf(false) }
+    var showHelp by remember { mutableStateOf(false) }
     val sliderPos = remember { mutableStateOf(0f) }
     var dragging by remember { mutableStateOf(false) }
     val ctx = LocalContext.current
@@ -88,6 +92,18 @@ fun App(crash: String? = null, vm: MeshViewModel = viewModel()) {
 
     val perms = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         vm.connectBulb()
+    }
+
+    // auto-connect on launch when keys are already configured
+    LaunchedEffect(Unit) {
+        if (vm.keys != null) {
+            if (vm.hasPermissions(ctx)) vm.connectBulb()
+            else if (Build.VERSION.SDK_INT >= 31) perms.launch(arrayOf(
+                Manifest.permission.BLUETOOTH_SCAN,
+                Manifest.permission.BLUETOOTH_CONNECT,
+            ))
+            else perms.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION))
+        }
     }
 
     var showCrash by remember { mutableStateOf(crash != null) }
@@ -240,12 +256,20 @@ fun App(crash: String? = null, vm: MeshViewModel = viewModel()) {
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White.copy(alpha = 0.6f)),
                             modifier = Modifier.height(52.dp)
                         ) { Text("Keys") }
+                        OutlinedButton(
+                            onClick = { showHelp = true },
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White.copy(alpha = 0.6f)),
+                            modifier = Modifier.height(52.dp)
+                        ) { Text("?") }
                     }
                     Spacer(Modifier.height(32.dp))
                 }
 
                 if (showKeys) {
                     KeyDialog { showKeys = false }
+                }
+                if (showHelp) {
+                    HelpDialog { showHelp = false }
                 }
             }
         }
@@ -318,6 +342,44 @@ private fun BulbOrb(level: Float, connected: Boolean) {
             modifier = Modifier.size(84.dp).scale(0.95f + 0.05f * animatedLevel)
         )
     }
+}
+
+@Composable
+private fun HelpDialog(onDismiss: () -> Unit) {
+    val steps = listOf(
+        "1. Provision the bulb first (one-off)",
+        "    Power-cycle the bulb (off 5s, on). In the free nRF Mesh app: Scan → tap the unprovisioned LEDVANCE device → Provision with defaults → bind an App Key → add Generic Light model.",
+        "2. Export your keys",
+        "    In nRF Mesh, open the network → Export → Network JSON (or use a Raspberry Pi provisioner's state file). You need: Network key, App key, and the bulb's Device key — each 32 hex characters.",
+        "3. Enter them here",
+        "    Tap Keys, paste the three values. Optional: bulb MAC (AA:BB:CC:...) to force connecting to a specific device, and its unicast address (usually 0x0002). Save and restart the app.",
+        "4. Connect & control",
+        "    Keep the bulb powered — it only advertises the BLE mesh proxy while powered. Tap Connect; the orb shows the live level and the slider drives it.",
+        "Trouble?",
+        "    • Proxy not found → power-cycle the bulb and keep it on",
+        "    • Timeout/Decryption failed → keys from a different network",
+        "    • This app only supports BLE mesh bulbs — not WiFi/cloud bulbs."
+    )
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = NightCard,
+        title = { Text("Getting started", color = Color.White) },
+        text = {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState())
+            ) {
+                steps.forEach { line ->
+                    val bold = !line.startsWith("    ")
+                    Text(line.trimEnd(),
+                        color = if (bold) Amber else Color.White.copy(alpha = 0.75f),
+                        fontSize = if (bold) 14.sp else 12.sp,
+                        fontWeight = if (bold) FontWeight.SemiBold else FontWeight.Normal)
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close", color = Amber) } }
+    )
 }
 
 @Composable
