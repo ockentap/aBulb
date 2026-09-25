@@ -84,6 +84,8 @@ fun App(crash: String? = null, vm: MeshViewModel = viewModel()) {
     val level by vm.brightness.collectAsState()
     val status by vm.statusText.collectAsState()
     var showKeys by remember { mutableStateOf(false) }
+    var showPair by remember { mutableStateOf(false) }
+    var showExport by remember { mutableStateOf(false) }
     var showHelp by remember { mutableStateOf(false) }
     val sliderPos = remember { mutableStateOf(0f) }
     var dragging by remember { mutableStateOf(false) }
@@ -236,7 +238,8 @@ fun App(crash: String? = null, vm: MeshViewModel = viewModel()) {
                     Spacer(Modifier.weight(0.08f))
 
                     val connected = state is ConnState.Ready
-                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.fillMaxWidth()) {
                         FilledTonalButton(
                             onClick = {
                                 if (connected) vm.disconnect()
@@ -252,25 +255,39 @@ fun App(crash: String? = null, vm: MeshViewModel = viewModel()) {
                                 containerColor = if (connected) NightCard else AmberDeep,
                                 contentColor = if (connected) Color.White.copy(alpha = 0.8f) else Night
                             ),
-                            modifier = Modifier.height(52.dp)
+                            modifier = Modifier.weight(1f).height(52.dp)
                         ) {
                             Icon(if (connected) Icons.Default.LinkOff else Icons.Default.Bluetooth,
                                 null, modifier = Modifier.size(20.dp))
                             Spacer(Modifier.width(8.dp))
                             Text(if (connected) "Disconnect" else "Connect", fontWeight = FontWeight.Medium)
                         }
+                        FilledTonalButton(
+                            onClick = { showPair = true },
+                            colors = ButtonDefaults.filledTonalButtonColors(
+                                containerColor = NightCard, contentColor = Amber),
+                            modifier = Modifier.weight(1f).height(52.dp)
+                        ) { Text("Pair", fontWeight = FontWeight.Medium) }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.fillMaxWidth()) {
                         OutlinedButton(
                             onClick = { showKeys = true },
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White.copy(alpha = 0.6f)),
-                            modifier = Modifier.height(52.dp)
+                            modifier = Modifier.weight(1f)
                         ) { Text("Keys") }
+                        OutlinedButton(
+                            onClick = { showExport = true },
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White.copy(alpha = 0.6f)),
+                            modifier = Modifier.weight(1f)
+                        ) { Text("Export") }
                         OutlinedButton(
                             onClick = { showHelp = true },
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White.copy(alpha = 0.6f)),
-                            modifier = Modifier.height(52.dp)
+                            modifier = Modifier.weight(0.6f)
                         ) { Text("?") }
                     }
-                    Spacer(Modifier.height(32.dp))
+                    Spacer(Modifier.height(20.dp))
                 }
 
                 if (showKeys) {
@@ -279,12 +296,24 @@ fun App(crash: String? = null, vm: MeshViewModel = viewModel()) {
                 if (showHelp) {
                     HelpDialog { showHelp = false }
                 }
+                if (showPair) {
+                    PairConfirmDialog(
+                        onConfirm = { showPair = false; vm.startPairing() },
+                        onDismiss = { showPair = false })
+                }
+                if (showExport) {
+                    ExportDialog(
+                        keysJson = vm.exportedKeysJson(),
+                        netJson = vm.exportNetworkJson(),
+                        onDismiss = { showExport = false })
+                }
             }
         }
     }
 }
 
 private fun stateLabel(s: ConnState) = when (s) {
+    ConnState.Pairing -> "pairing…"
     ConnState.Idle -> "offline"
     ConnState.Scanning -> "finding bulb…"
     ConnState.Connecting -> "connecting…"
@@ -462,5 +491,66 @@ private fun KeyDialog(onDismiss: () -> Unit) {
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancel", color = Color.White.copy(alpha = 0.6f)) }
         }
+    )
+}
+
+@Composable
+private fun PairConfirmDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = NightCard,
+        title = { Text("Pair a bulb", color = Color.White) },
+        text = {
+            Text(
+                "This creates a brand-new mesh network owned by this phone and joins a " +
+                "bulb to it.\n\n" +
+                "The bulb must be UNPROVISIONED: power-cycle it 6 times quickly " +
+                "(off 1s, on 1s, repeat) until it stops remembering its old network, " +
+                "or factory-reset it in its current app.\n\n" +
+                "If the bulb already belongs to a network you can join with Keys/Import " +
+                "instead — pairing does not steal an existing bulb.",
+                color = Color.White.copy(alpha = 0.75f), fontSize = 13.sp)
+        },
+        confirmButton = { TextButton(onClick = onConfirm) { Text("Start pairing", color = Amber) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel", color = Color.White.copy(alpha = 0.6f)) } }
+    )
+}
+
+@Composable
+private fun ExportDialog(keysJson: String, netJson: String, onDismiss: () -> Unit) {
+    val ctx = LocalContext.current
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = NightCard,
+        title = { Text("Export keys", color = Color.White) },
+        text = {
+            Column {
+                Text("Share these with another aBulb install (Keys \u2192 Import file). " +
+                     "Anyone with this file can control your bulb.",
+                     color = Color.White.copy(alpha = 0.6f), fontSize = 13.sp)
+                Spacer(Modifier.height(16.dp))
+                if (keysJson.isBlank()) {
+                    Text("No keys configured yet.", color = Color.White.copy(alpha = 0.6f))
+                } else {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = {
+                            val i = android.content.Intent(android.content.Intent.ACTION_SEND)
+                            i.type = "application/json"
+                            i.putExtra(android.content.Intent.EXTRA_SUBJECT, "abulb-keys.json")
+                            i.putExtra(android.content.Intent.EXTRA_TEXT, keysJson)
+                            ctx.startActivity(android.content.Intent.createChooser(i, "Share keys"))
+                        }) { Text("Key file", color = Amber) }
+                        OutlinedButton(onClick = {
+                            val i = android.content.Intent(android.content.Intent.ACTION_SEND)
+                            i.type = "application/json"
+                            i.putExtra(android.content.Intent.EXTRA_SUBJECT, "abulb-network.json")
+                            i.putExtra(android.content.Intent.EXTRA_TEXT, netJson.ifBlank { keysJson })
+                            ctx.startActivity(android.content.Intent.createChooser(i, "Share network"))
+                        }) { Text("Full network", color = Amber) }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close", color = Amber) } }
     )
 }

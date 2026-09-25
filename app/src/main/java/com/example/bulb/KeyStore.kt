@@ -15,6 +15,12 @@ object KeyStore {
     private const val PREF = "bulb_keys"
 
     /** Returns null when the user hasn't entered keys yet. */
+    fun exportedJson(k: MeshKeys): String = org.json.JSONObject()
+        .put("format", "abulb-keys-v1")
+        .put("netKey", k.net).put("appKey", k.app).put("deviceKey", k.dev)
+        .put("mac", k.mac).put("bulbUnicast", "0x%04x".format(k.bulbUnicast))
+        .toString(2)
+
     fun load(ctx: Context): MeshKeys? {
         prefsLoad(ctx)?.let { return it }
         return bakedLoad()

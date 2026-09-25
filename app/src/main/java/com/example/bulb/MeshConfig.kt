@@ -14,4 +14,5 @@ object MeshConfig {
     // Some LEDVANCE bulbs clamp the lightness model to 1..50
     const val LIGHTNESS_MAX = 50
     const val LIGHTNESS_MIN = 1
+    const val LIGHT_LIGHTNESS_MODEL_ID = 0x1300  // SIG model, verified from bulb composition page
 }
