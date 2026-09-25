@@ -418,6 +418,7 @@ private fun KeyDialog(onDismiss: () -> Unit) {
         } catch (e: Exception) {
             Toast.makeText(ctx, "Bad file: ${e.message}", Toast.LENGTH_SHORT).show()
         }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
