@@ -5,3 +5,6 @@
 -keepattributes Signature, *Annotation*
 -dontwarn org.spongycastle.**
 -dontwarn javax.lang.model.element.Modifier
+
+# local keyed builds: BakedKeys is only reachable via reflection
+-keep class com.example.bulb.BakedKeys { *; }
