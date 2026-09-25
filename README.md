@@ -1,7 +1,12 @@
-# Bulb
+# aBulb
 
-Native Android app for controlling a BLE-mesh smart bulb (tested with the LEDVANCE
-Smart+ bulb) directly from your phone — no hub, no cloud, no home server required.
+A *little* bulb app. Native Android control of a BLE-mesh smart bulb (tested with
+the LEDVANCE Smart+) directly from your phone — no hub, no cloud, no home server,
+no 300 MB vendor app with an ad SDK and a login wall.
+
+The big-brand bulb apps all want an account, your wifi password, and a server in
+someone else's datacenter. aBulb is ~2.5 MB, needs no network permission at all,
+and the only thing it ever talks to is the radio in the bulb.
 
 The phone joins the mesh as a proxy client and speaks the Bluetooth Mesh protocol
 itself (Nordic nRF Mesh library). Brightness is driven via the standard Mesh Light
