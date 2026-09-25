@@ -394,6 +394,23 @@ private fun HelpDialog(onDismiss: () -> Unit) {
 private fun KeyDialog(onDismiss: () -> Unit) {
     val ctx = LocalContext.current
     var net by remember { mutableStateOf("") }
+    val filePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) try {
+            val txt = ctx.contentResolver.openInputStream(uri)?.readBytes()
+                ?.toString(Charsets.UTF_8) ?: ""
+            val o = org.json.JSONObject(txt)
+            if (o.optString("format") == "abulb-keys-v1") {
+                net = o.getString("netKey"); app = o.getString("appKey"); dev = o.getString("deviceKey")
+                mac = o.optString("mac").uppercase()
+                if (o.has("unicast")) uni = String.format("0x%04X", o.getInt("unicast"))
+                Toast.makeText(ctx, "Keys loaded — tap Save", Toast.LENGTH_SHORT).show()
+            } else Toast.makeText(ctx, "Not an aBulb key file", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Toast.makeText(ctx, "Bad file: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
     var app by remember { mutableStateOf("") }
     var dev by remember { mutableStateOf("") }
     var mac by remember { mutableStateOf("") }
@@ -419,6 +436,10 @@ private fun KeyDialog(onDismiss: () -> Unit) {
             }
         },
         confirmButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = { filePicker.launch(arrayOf("application/json", "text/plain", "*/*")) }) {
+                    Text("Import file", color = Amber)
+                }
             TextButton(onClick = {
                 val uniOk = uni.toIntOrNull(16)?.let { it in 1..0x7FFF } == true ||
                             uni.startsWith("0x") && uni.substring(2).toIntOrNull(16) != null
@@ -431,6 +452,7 @@ private fun KeyDialog(onDismiss: () -> Unit) {
                     Toast.makeText(ctx, "Each key must be 32 hex chars", Toast.LENGTH_SHORT).show()
                 }
             }) { Text("Save", color = Amber) }
+            }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancel", color = Color.White.copy(alpha = 0.6f)) }
