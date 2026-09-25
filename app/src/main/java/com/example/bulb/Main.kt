@@ -25,6 +25,9 @@ import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloatAsState
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
@@ -90,6 +93,7 @@ fun App(crash: String? = null, vm: MeshViewModel = viewModel()) {
         if (!dragging) level?.let { sliderPos.value = it / MeshConfig.LIGHTNESS_MAX.toFloat() }
     }
 
+    val uiScope = rememberCoroutineScope()
     val perms = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         vm.connectBulb()
     }
@@ -179,7 +183,10 @@ fun App(crash: String? = null, vm: MeshViewModel = viewModel()) {
 
                     Slider(
                         value = sliderPos.value,
-                        onValueChange = { sliderPos.value = it; dragging = true },
+                        onValueChange = {
+                            sliderPos.value = it; dragging = true
+                            vm.liveSet((it * MeshConfig.LIGHTNESS_MAX).roundToInt())
+                        },
                         onValueChangeFinished = {
                             dragging = false
                             vm.setBrightness((sliderPos.value * MeshConfig.LIGHTNESS_MAX).roundToInt())
@@ -201,9 +208,10 @@ fun App(crash: String? = null, vm: MeshViewModel = viewModel()) {
                             FilterChip(
                                 selected = false,
                                 onClick = {
-                                    sliderPos.value = v
                                     dragging = false
-                                    vm.setBrightness((v * MeshConfig.LIGHTNESS_MAX).roundToInt())
+                                    val target = (v * MeshConfig.LIGHTNESS_MAX).roundToInt()
+                                    vm.rampTo(target)
+                                    sliderPos.value = v
                                 },
                                 label = { Text(name, fontSize = 13.sp) },
                                 shape = RoundedCornerShape(50),

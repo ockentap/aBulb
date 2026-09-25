@@ -16,6 +16,22 @@ object KeyStore {
 
     /** Returns null when the user hasn't entered keys yet. */
     fun load(ctx: Context): MeshKeys? {
+        prefsLoad(ctx)?.let { return it }
+        return bakedLoad()
+    }
+
+    private fun bakedLoad(): MeshKeys? = try {
+        val c = Class.forName("com.example.bulb.BakedKeys")
+        MeshKeys(
+            net = c.getField("NET").get(null) as String,
+            app = c.getField("APP").get(null) as String,
+            dev = c.getField("DEV").get(null) as String,
+            mac = c.getField("MAC").get(null) as String,
+            bulbUnicast = c.getField("UNICAST").get(null) as Int,
+        )
+    } catch (_: Throwable) { null }
+
+    private fun prefsLoad(ctx: Context): MeshKeys? {
         val p = ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE)
         val n = p.getString("net", null)
         val a = p.getString("app", null)

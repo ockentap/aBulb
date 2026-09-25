@@ -9,3 +9,6 @@ local.properties
 /captures
 .externalNativeBuild
 .cxx
+
+# personal keys (local builds only)
+app/src/main/java/com/example/bulb/BakedKeys.kt

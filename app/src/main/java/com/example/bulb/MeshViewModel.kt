@@ -89,6 +89,7 @@ class MeshViewModel(app: Application) : androidx.lifecycle.AndroidViewModel(app)
                 if (src == (keys?.bulbUnicast ?: MeshConfig.BULB_UNICAST) && message is LightLightnessStatus) {
                     br(message.presentLightness)
                     st("Bulb level: ${message.presentLightness}")
+                    if (rampJob?.isActive != true) lastSent = message.presentLightness
                 }
             }
             override fun onMessageDecryptionFailed(meshLayer: String, errorMessage: String) {
@@ -213,14 +214,49 @@ class MeshViewModel(app: Application) : androidx.lifecycle.AndroidViewModel(app)
         network?.appKeys?.firstOrNull { it.keyIndex == MeshConfig.APP_KEY_INDEX }
 
     fun setBrightness(level: Int) {
+        rampJob?.cancel()
+        sendLevel(level)
+    }
+
+    /** Live drag: throttled to one send per ~90ms so the light tracks the finger. */
+    fun liveSet(level: Int) {
+        rampJob?.cancel()
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (level == lastSent || now - lastSendAt < 90) return
+        sendLevel(level)
+    }
+
+    /** Preset tap: ramp through intermediate values, duration proportional to distance. */
+    fun rampTo(target: Int) {
+        rampJob?.cancel()
+        rampJob = scope.launch(meshThread) {
+            val from = if (lastSent >= 0) lastSent else target
+            val dist = kotlin.math.abs(target - from)
+            if (dist <= 2) { sendLevel(target); return@launch }
+            val steps = minOf(dist, 24)
+            for (i in 1..steps) {
+                sendLevel(from + Math.round((target - from) * i.toFloat() / steps))
+                delay(60)
+            }
+        }
+    }
+
+    private fun sendLevel(level: Int) {
         val key = appKey() ?: run { st("Network not imported yet"); return }
         if (connState.value !is ConnState.Ready) { st("Connect to the bulb first"); return }
         val clamped = level.coerceIn(0, MeshConfig.LIGHTNESS_MAX)
         scope.launch(meshThread) {
-            try { meshApi.createMeshPdu(keys?.bulbUnicast ?: MeshConfig.BULB_UNICAST, LightLightnessSet(key, clamped, nextTid())) }
-            catch (e: Exception) { st("Create failed: ${e.message}") }
+            try {
+                meshApi.createMeshPdu(keys?.bulbUnicast ?: MeshConfig.BULB_UNICAST, LightLightnessSet(key, clamped, nextTid()))
+                lastSent = clamped; lastSendAt = android.os.SystemClock.elapsedRealtime()
+            } catch (e: Exception) { st("Create failed: ${e.message}") }
         }
     }
+
+    fun lastSentLevel(): Int = lastSent
+    private var rampJob: kotlinx.coroutines.Job? = null
+    @Volatile private var lastSent = -1
+    @Volatile private var lastSendAt = 0L
 
     fun refreshState() {
         val key = appKey() ?: return
