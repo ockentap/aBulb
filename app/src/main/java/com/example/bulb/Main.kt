@@ -117,7 +117,6 @@ fun App(crash: String? = null, vm: MeshViewModel = viewModel()) {
         }
     }
 
-    val uiScope = rememberCoroutineScope()
     val perms = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         vm.connectBulb()
     }
@@ -212,7 +211,7 @@ fun App(crash: String? = null, vm: MeshViewModel = viewModel()) {
                         level = sliderPos.value,
                         connected = state is ConnState.Ready,
                         orbSize = orbSize,
-                        label = percentText(sliderPos.value, level),
+                        label = percentText(sliderPos.value),
                         onDoubleTap = {
                             // double-tap the bulb: off <-> the last level it was lit at
                             dragging = false
@@ -377,7 +376,7 @@ private fun stateLabel(s: ConnState) = when (s) {
     is ConnState.Error -> "needs attention"
 }
 
-private fun percentText(pos: Float, level: Int?): String {
+private fun percentText(pos: Float): String {
     val pct = (pos * 100).roundToInt()
     return if (pct <= 0) "off" else "$pct%"
 }

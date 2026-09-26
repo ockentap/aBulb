@@ -172,7 +172,6 @@ class MeshViewModel(app: Application) : androidx.lifecycle.AndroidViewModel(app)
                     ackWatch?.cancel()
                     if (linkState.value != LinkState.OK) linkState.value = LinkState.OK
                     br(message.presentLightness)
-                    st("Bulb level: ${message.presentLightness}")
                     if (rampJob?.isActive != true) lastSent = message.presentLightness
                 }
             }

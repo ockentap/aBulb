@@ -2,7 +2,7 @@ package com.example.bulb
 
 /** Static defaults; per-network values (UUIDs, addresses) come from KeyStore at runtime. */
 object MeshConfig {
-    const val APP_VERSION = "1.3"
+    const val APP_VERSION = "1.3.1"
     const val MESH_UUID = "00000000-1111-2222-3333-444444444444"   // overridden by user via Keys dialog
     const val PROVISIONER_UUID = "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE"
     const val PROVISIONER_NAME = "phone-provisioner"
