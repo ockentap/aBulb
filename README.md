@@ -127,16 +127,9 @@ sdk.dir=/path/to/Android/sdk   # local.properties
 ./gradlew :app:assembleRelease
 ```
 
-Two kinds of build come out of this repo:
-
-- **Keyless (what CI publishes).** Every push to `main` builds an APK as a workflow
-  artifact; every `v*` tag publishes a [release](../../releases) with the APK attached.
-  It contains no credentials — the user pairs a bulb or imports their own keys.
-- **Keyed (private builds).** Drop a `BakedKeys.kt` into
-  `app/src/main/java/com/example/bulb/` (it's gitignored) with `NET`, `APP`, `DEV`, `MAC`
-  and `UNICAST` constants and the build ships with those keys already in it — that's how
-  a "just install it and it works" copy for family is made. R8 keeps that class via
-  `app/proguard-rules.pro`, since it's only reached by reflection.
+Every push to `main` builds an APK as a workflow artifact, and every `v*` tag publishes a
+[release](../../releases) with the APK attached. That APK is keyless: it carries no
+credentials, and you pair a bulb or import your own keys on first run.
 
 Built against `no.nordicsemi.android:mesh:3.3.7` (Mesh Profile / provisioner stack)
 and `no.nordicsemi.android:ble:2.6.1` for the proxy GATT client. The proxy data
