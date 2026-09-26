@@ -31,6 +31,9 @@ sealed class ConnState {
     object Connecting : ConnState()
     object Ready : ConnState()
     object Pairing : ConnState()
+
+    /** Deliberately let the link go after being idle — not a failure, the resting state. */
+    object Released : ConnState()
     data class Error(val msg: String) : ConnState()
 }
 
@@ -63,6 +66,10 @@ class MeshViewModel(app: Application) : androidx.lifecycle.AndroidViewModel(app)
     private var ackWatch: kotlinx.coroutines.Job? = null
     @Volatile private var awaitingAckSince = 0L
     private var reconnectAfterImport = false
+    private var idleJob: kotlinx.coroutines.Job? = null
+
+    /** What the user asked the bulb to be, held until the link is up and it can actually land. */
+    @Volatile private var pendingLevel: Int? = null
 
     /** This install's own mesh source address — distinct per install, see LocalNode. */
     private var phoneAddr: Int = LocalNode.address(app)
@@ -192,14 +199,19 @@ class MeshViewModel(app: Application) : androidx.lifecycle.AndroidViewModel(app)
             override fun onDeviceConnecting(device: BluetoothDevice) { lastSeenMac = device.address; if (!pairing) cs(ConnState.Connecting) }
             override fun onDeviceConnected(device: BluetoothDevice) {}
             override fun onDeviceDisconnecting(device: BluetoothDevice) {}
-            override fun onDeviceDisconnected(device: BluetoothDevice) { connectWatchdog?.cancel(); if (!pairing) cs(ConnState.Idle) }
-            override fun onLinkLossOccurred(device: BluetoothDevice) { connectWatchdog?.cancel(); if (!pairing) cs(ConnState.Idle) }
+            override fun onDeviceDisconnected(device: BluetoothDevice) { connectWatchdog?.cancel(); if (!pairing && connState.value !is ConnState.Released) cs(ConnState.Idle) }
+            override fun onLinkLossOccurred(device: BluetoothDevice) { connectWatchdog?.cancel(); if (!pairing && connState.value !is ConnState.Released) cs(ConnState.Idle) }
             override fun onServicesDiscovered(device: BluetoothDevice, optionalServicesFound: Boolean) {}
             override fun onDeviceReady(device: BluetoothDevice) {
                 stopScan()
                 connectWatchdog?.cancel()
-                if (pairing) beginHandshake()
-                else { cs(ConnState.Ready); refreshState() }
+                if (pairing) { beginHandshake(); return }
+                cs(ConnState.Ready)
+                // Touched while we were still connecting? Honour it now that the link is up.
+                val wanted = pendingLevel
+                pendingLevel = null
+                if (wanted != null) sendLevel(wanted) else refreshState()
+                touch()
             }
             override fun onBondingRequired(device: BluetoothDevice) {}
             override fun onBonded(device: BluetoothDevice) {}
@@ -225,6 +237,7 @@ class MeshViewModel(app: Application) : androidx.lifecycle.AndroidViewModel(app)
         if (!adapter.isEnabled) { cs(ConnState.Error("Turn Bluetooth on")); return }
         disconnect()
         pairing = true; imported = false
+        pendingLevel = null
         cs(ConnState.Pairing)
         st("Creating a fresh mesh network…")
         scope.launch(meshThread) {
@@ -357,6 +370,7 @@ class MeshViewModel(app: Application) : androidx.lifecycle.AndroidViewModel(app)
     fun connectBulb() {
         ensureImported()
         val ctx = getApplication<Application>()
+        st("")
         if (!hasPermissions(ctx)) { st("Grant Bluetooth permission first"); return }
         val adapter = adapter() ?: run {
             cs(ConnState.Error("No Bluetooth on this device")); return }
@@ -438,11 +452,17 @@ class MeshViewModel(app: Application) : androidx.lifecycle.AndroidViewModel(app)
 
     fun setBrightness(level: Int) {
         rampJob?.cancel()
+        pendingLevel = level
+        touch()
+        if (connState.value !is ConnState.Ready) { connectIfIdle(); return }
         sendLevel(level)
     }
 
     /** Live drag: throttled to one send per ~90ms so the light tracks the finger. */
     fun liveSet(level: Int) {
+        pendingLevel = level
+        touch()
+        if (connState.value !is ConnState.Ready) { connectIfIdle(); return }
         rampJob?.cancel()
         val now = android.os.SystemClock.elapsedRealtime()
         if (level == lastSent || now - lastSendAt < 90) return
@@ -451,6 +471,9 @@ class MeshViewModel(app: Application) : androidx.lifecycle.AndroidViewModel(app)
 
     /** Preset tap: ramp through intermediate values, duration proportional to distance. */
     fun rampTo(target: Int) {
+        pendingLevel = target
+        touch()
+        if (connState.value !is ConnState.Ready) { connectIfIdle(); return }
         rampJob?.cancel()
         rampJob = scope.launch(meshThread) {
             val from = if (lastSent >= 0) lastSent else target
@@ -462,6 +485,31 @@ class MeshViewModel(app: Application) : androidx.lifecycle.AndroidViewModel(app)
                 delay(60)
             }
         }
+    }
+
+    /**
+     * Any touch in the app means "I'm using this": hold the bulb's single BLE link for a few
+     * seconds more, then let go so another phone can take its turn. Writes themselves are not
+     * exclusive — the bulb applies the last message it hears from anyone.
+     */
+    private fun touch() {
+        idleJob?.cancel()
+        if (connState.value !is ConnState.Ready) return
+        idleJob = scope.launch {
+            delay(MeshConfig.IDLE_RELEASE_MS)
+            if (connState.value is ConnState.Ready) {
+                // Don't bury a "the bulb never answered" complaint under a routine notice.
+                if (linkState.value != LinkState.NO_REPLY) st("Link released — touch to reconnect")
+                try { ble.stop() } catch (_: Exception) {}
+                cs(ConnState.Released)
+            }
+        }
+    }
+
+    /** Touching the app while we're not connected means "connect and do what I asked". */
+    private fun connectIfIdle() {
+        val s = connState.value
+        if (s is ConnState.Idle || s is ConnState.Released || s is ConnState.Error) connectBulb()
     }
 
     private fun sendLevel(level: Int) {

@@ -373,6 +373,7 @@ private fun stateLabel(s: ConnState) = when (s) {
     ConnState.Scanning -> "finding bulb…"
     ConnState.Connecting -> "connecting…"
     ConnState.Ready -> "connected"
+    ConnState.Released -> "tap to connect"
     is ConnState.Error -> "needs attention"
 }
 
@@ -482,6 +483,8 @@ private fun HelpDialog(diag: String, onDismiss: () -> Unit) {
         "    Tap ⋯ (top right) → Keys & sharing, paste the three values. Optional: bulb MAC (AA:BB:CC:...) to force connecting to a specific device, and its unicast address (usually 0x0002). Save and restart the app.",
         "4. Connect & control",
         "    Keep the bulb powered — it only advertises the BLE mesh proxy while powered. Tap Connect; the orb shows the live level and the slider drives it. Double-tap the orb to switch between off and your last level.",
+        "5. It lets go on purpose",
+        "    The bulb only accepts one phone at a time, so the link is released about 5 seconds after your last touch — that's the \"tap to connect\" state, not an error. Touch anything (slider, preset, orb) and it reconnects and applies what you asked for.",
         "Also in ⋯:",
         "    Pair a new bulb (joins a factory-reset bulb to a new network), Disconnect, and this help page.",
         "Trouble?",
