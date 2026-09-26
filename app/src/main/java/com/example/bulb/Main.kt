@@ -98,22 +98,12 @@ fun App(crash: String? = null, vm: MeshViewModel = viewModel()) {
     val level by vm.brightness.collectAsState()
     val status by vm.statusText.collectAsState()
     val link by vm.linkState.collectAsState()
-    // The radio is handed back when idle, but the app still HAS the bulb — so the UI keeps saying
-    // connected, and the link is taken back silently whenever it's needed.
-    val online = state is ConnState.Ready || state is ConnState.Released
-
-    // Once the app has the bulb it keeps saying so, even while the radio is being re-taken in the
-    // background: a quiet reconnect is not news the user should have to read.
-    var hadBulb by remember { mutableStateOf(false) }
-    LaunchedEffect(state) {
-        when (state) {
-            is ConnState.Ready, is ConnState.Released -> hadBulb = true
-            is ConnState.Error, is ConnState.Pairing -> hadBulb = false
-            else -> {}
-        }
-    }
+    // The ViewModel owns this notion: the radio may be handed back and re-taken, but the app HAS the
+    // bulb — and losing the radio is never something the user is told about.
+    val online by vm.online.collectAsState()
+    // A silent re-take of the radio doesn't announce itself either.
     val visibleLabel =
-        if (hadBulb && (state is ConnState.Scanning || state is ConnState.Connecting)) "connected"
+        if (online && (state is ConnState.Scanning || state is ConnState.Connecting)) "connected"
         else stateLabel(state)
     var showKeys by remember { mutableStateOf(false) }      // keys + sharing, one dialog
     var showPair by remember { mutableStateOf(false) }
@@ -519,12 +509,13 @@ private fun HelpDialog(diag: String, onDismiss: () -> Unit) {
         "4. Connect & control",
         "    Keep the bulb powered — it only advertises the BLE mesh proxy while powered. Tap Connect; the orb shows the live level and the slider drives it. Double-tap the orb to switch between off and your last level.",
         "5. It shares the radio",
-        "    The bulb accepts one phone at a time, so the app hands the radio back a few seconds after your last touch (or the moment you leave the app) and silently takes it again when you touch anything or come back. The screen stays on connected throughout — your level lands as soon as the link is up, nothing to tap and nothing to fix.",
+        "    The bulb accepts one phone at a time, so the app hands the radio back a few seconds after the last brightness change you made (or the moment you leave the app) and silently takes it again when you change the level or come back. Browsing menus doesn't hold it. The screen stays on connected throughout.",
         "Also in ⋯:",
         "    Pair a new bulb (joins a factory-reset bulb to a new network), Disconnect, and this help page.",
         "Trouble?",
         "    • Proxy not found → power-cycle the bulb and keep it on",
         "    • Timeout/Decryption failed → keys from a different network",
+        "    • Bulb ignores your changes → the app re-joins under a fresh mesh address by itself (tap Fix link if that still doesn't take)",
         "    • This app only supports BLE mesh bulbs — not WiFi/cloud bulbs.",
         "Two phones, one bulb?",
         "    Each install writes from its own mesh address, so both can control the bulb — but only one of them can hold the BLE link to it at a time. If it says connected while brightness ignores you, tap Fix link (that re-joins from a fresh address).",

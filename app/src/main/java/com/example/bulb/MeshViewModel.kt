@@ -74,6 +74,15 @@ class MeshViewModel(app: Application) : androidx.lifecycle.AndroidViewModel(app)
     /** This install's own mesh source address — distinct per install, see LocalNode. */
     private var phoneAddr: Int = LocalNode.address(app)
 
+    /** What the USER is shown: "the app has the bulb". True across silent re-takes of the radio,
+     *  and only an explicit Disconnect clears it — losing the radio is not the user's business. */
+    val online = kotlinx.coroutines.flow.MutableStateFlow(false)
+    @Volatile private var everOnline = false
+    @Volatile private var userDisconnected = false
+    private var retryJob: kotlinx.coroutines.Job? = null
+    @Volatile private var autoFixedThisEpisode = false
+    @Volatile private var lastAutoFixAt = 0L
+
     val connState = kotlinx.coroutines.flow.MutableStateFlow<ConnState>(ConnState.Idle)
     val brightness = kotlinx.coroutines.flow.MutableStateFlow<Int?>(prefsLastLevel) // raw 0..50
     val statusText = kotlinx.coroutines.flow.MutableStateFlow<String>("")
@@ -83,7 +92,18 @@ class MeshViewModel(app: Application) : androidx.lifecycle.AndroidViewModel(app)
     fun rememberedLevel(): Int? = prefsLastLevel
 
     private fun st(v: String) { scope.launch(Dispatchers.Main.immediate) { statusText.value = v } }
-    private fun cs(v: ConnState) { scope.launch(Dispatchers.Main.immediate) { connState.value = v } }
+    private fun cs(v: ConnState) {
+        scope.launch(Dispatchers.Main.immediate) {
+            connState.value = v
+            when (v) {
+                is ConnState.Ready, is ConnState.Released -> { everOnline = true; online.value = true }
+                is ConnState.Idle, is ConnState.Error -> online.value = false
+                // scanning / connecting / pairing: keep showing whatever the user last saw, so a
+                // silent re-take of the radio doesn't announce itself.
+                else -> {}
+            }
+        }
+    }
     private fun br(v: Int) { scope.launch(Dispatchers.Main.immediate) { brightness.value = v } }
 
     init {
@@ -177,6 +197,7 @@ class MeshViewModel(app: Application) : androidx.lifecycle.AndroidViewModel(app)
                 if (src == (keys?.bulbUnicast ?: MeshConfig.BULB_UNICAST) && message is LightLightnessStatus) {
                     awaitingAckSince = 0L
                     ackWatch?.cancel()
+                    autoFixedThisEpisode = false   // the bulb is talking to us again
                     if (linkState.value != LinkState.OK) linkState.value = LinkState.OK
                     br(message.presentLightness)
                     if (rampJob?.isActive != true) lastSent = message.presentLightness
@@ -199,8 +220,8 @@ class MeshViewModel(app: Application) : androidx.lifecycle.AndroidViewModel(app)
             override fun onDeviceConnecting(device: BluetoothDevice) { lastSeenMac = device.address; if (!pairing) cs(ConnState.Connecting) }
             override fun onDeviceConnected(device: BluetoothDevice) {}
             override fun onDeviceDisconnecting(device: BluetoothDevice) {}
-            override fun onDeviceDisconnected(device: BluetoothDevice) { connectWatchdog?.cancel(); if (!pairing && connState.value !is ConnState.Released) cs(ConnState.Idle) }
-            override fun onLinkLossOccurred(device: BluetoothDevice) { connectWatchdog?.cancel(); if (!pairing && connState.value !is ConnState.Released) cs(ConnState.Idle) }
+            override fun onDeviceDisconnected(device: BluetoothDevice) { connectWatchdog?.cancel(); linkDropped() }
+            override fun onLinkLossOccurred(device: BluetoothDevice) { connectWatchdog?.cancel(); linkDropped() }
             override fun onServicesDiscovered(device: BluetoothDevice, optionalServicesFound: Boolean) {}
             override fun onDeviceReady(device: BluetoothDevice) {
                 stopScan()
@@ -217,7 +238,14 @@ class MeshViewModel(app: Application) : androidx.lifecycle.AndroidViewModel(app)
             override fun onBonded(device: BluetoothDevice) {}
             override fun onBondingFailed(device: BluetoothDevice) {}
             override fun onError(device: BluetoothDevice, message: String, errorCode: Int) {
-                cs(ConnState.Error(gattHint(errorCode, message)))
+                // Link-level failures while the app is meant to have the bulb: stay quiet and retry
+                // instead of telling the user they're disconnected. Real errors still surface.
+                val linkLevel = errorCode == 8 || errorCode == 19 || errorCode == 22 || errorCode == 133
+                if (linkLevel && everOnline && !userDisconnected) {
+                    st("")
+                    cs(ConnState.Released)
+                    scheduleRetry()
+                } else cs(ConnState.Error(gattHint(errorCode, message)))
             }
             override fun onDeviceNotSupported(device: BluetoothDevice) {
                 cs(ConnState.Error("Device has no mesh service"))
@@ -373,6 +401,8 @@ class MeshViewModel(app: Application) : androidx.lifecycle.AndroidViewModel(app)
         if (s is ConnState.Scanning || s is ConnState.Connecting || s is ConnState.Ready) {
             touch(); return
         }
+        userDisconnected = false
+        if (keys != null) online.value = true   // we're going for it: the user sees "connected"
         ensureImported()
         val ctx = getApplication<Application>()
         if (!hasPermissions(ctx)) { st("Grant Bluetooth permission first"); return }
@@ -399,10 +429,16 @@ class MeshViewModel(app: Application) : androidx.lifecycle.AndroidViewModel(app)
         connectWatchdog = scope.launch {
             delay(30_000)
             if (connState.value is ConnState.Connecting || connState.value is ConnState.Scanning) {
-                // Keep the reason in the status line: the disconnect below flips the state back to Idle.
-                st("No answer from the bulb — power-cycle it and retry")
-                cs(ConnState.Error("No answer from the bulb"))
-                try { ble.stop() } catch (_: Exception) {}
+                if (everOnline && !userDisconnected) {
+                    // The radio is presumably held by another controller. Don't complain — just go
+                    // quiet and keep trying; the queued attempt may still land on its own.
+                    cs(ConnState.Released)
+                    scheduleRetry()
+                } else {
+                    st("No answer from the bulb — power-cycle it and retry")
+                    cs(ConnState.Error("No answer from the bulb"))
+                    try { ble.stop() } catch (_: Exception) {}
+                }
             }
         }
     }
@@ -446,6 +482,8 @@ class MeshViewModel(app: Application) : androidx.lifecycle.AndroidViewModel(app)
     fun disconnect() {
         connectWatchdog?.cancel()
         idleJob?.cancel()
+        retryJob?.cancel()
+        userDisconnected = true
         scope.launch(Dispatchers.Main) {
             try { ble.stop() } catch (_: Exception) {}
         }
@@ -460,15 +498,14 @@ class MeshViewModel(app: Application) : androidx.lifecycle.AndroidViewModel(app)
     fun setBrightness(level: Int) {
         rampJob?.cancel()
         pendingLevel = level
-        touch()
         if (connState.value !is ConnState.Ready) { connectIfIdle(); return }
         sendLevel(level)
     }
 
-    /** Live drag: throttled to one send per ~90ms so the light tracks the finger. */
+    /** Live drag: throttled to one send per ~90ms so the light tracks the finger.
+     *  Note: only an actual send in sendLevel() keeps the radio held — poking the UI does not. */
     fun liveSet(level: Int) {
         pendingLevel = level
-        touch()
         if (connState.value !is ConnState.Ready) { connectIfIdle(); return }
         rampJob?.cancel()
         val now = android.os.SystemClock.elapsedRealtime()
@@ -479,7 +516,6 @@ class MeshViewModel(app: Application) : androidx.lifecycle.AndroidViewModel(app)
     /** Preset tap: ramp through intermediate values, duration proportional to distance. */
     fun rampTo(target: Int) {
         pendingLevel = target
-        touch()
         if (connState.value !is ConnState.Ready) { connectIfIdle(); return }
         rampJob?.cancel()
         rampJob = scope.launch(meshThread) {
@@ -521,14 +557,43 @@ class MeshViewModel(app: Application) : androidx.lifecycle.AndroidViewModel(app)
 
     /** App came back to the front (or launched): make sure the link is there, silently. */
     fun onAppForeground() {
+        if (userDisconnected || keys == null) return
         val s = connState.value
         if (s is ConnState.Released || s is ConnState.Idle || s is ConnState.Error) connectBulb()
+        if (s is ConnState.Released) scheduleRetry()
     }
 
     /** App went to the background: hand the radio back right away instead of waiting out the idle timer. */
     fun onAppBackground() {
         idleJob?.cancel()
+        retryJob?.cancel()
         releaseQuietly()
+    }
+
+    /**
+     * The radio went away on its own (another controller took it, out of range, bulb power-cycled).
+     * If the app is meant to have the bulb, keep saying so and quietly take it back later — the user
+     * must never learn about this from the UI.
+     */
+    private fun linkDropped() {
+        if (pairing) return
+        if (everOnline && !userDisconnected) {
+            cs(ConnState.Released)
+            scheduleRetry()
+        } else cs(ConnState.Idle)
+    }
+
+    /** Quietly keep trying to take the radio back, while the app is in front of the user. */
+    private fun scheduleRetry() {
+        if (userDisconnected) return
+        if (retryJob?.isActive == true) return
+        retryJob = scope.launch {
+            while (!userDisconnected) {
+                delay(10_000)
+                if (userDisconnected) break
+                if (connState.value is ConnState.Released) connectBulb() else break
+            }
+        }
     }
 
     /** Touching the app while we're not connected means "connect and do what I asked". */
@@ -546,6 +611,8 @@ class MeshViewModel(app: Application) : androidx.lifecycle.AndroidViewModel(app)
                 meshApi.createMeshPdu(keys?.bulbUnicast ?: MeshConfig.BULB_UNICAST, LightLightnessSet(key, clamped, nextTid()))
                 lastSent = clamped; lastSendAt = android.os.SystemClock.elapsedRealtime()
                 uiPrefs.edit().putInt("lastLevel", clamped).apply()
+                // A real change to the bulb is what keeps the radio held; nothing else does.
+                touch()
                 armAckWatch()
             } catch (e: Exception) { st("Create failed: ${e.message}") }
         }
@@ -560,9 +627,24 @@ class MeshViewModel(app: Application) : androidx.lifecycle.AndroidViewModel(app)
             delay(4_000)
             if (awaitingAckSince != 0L && connState.value is ConnState.Ready) {
                 linkState.value = LinkState.NO_REPLY
-                st("The bulb isn't answering our writes — tap Fix link")
+                st("The bulb isn't answering our writes — fixing the link")
+                autoFixLink()
             }
         }
+    }
+
+    /**
+     * The bulb is ignoring writes while our radio is fine — exactly the replay-guard case that
+     * Fix link exists for, so do it ourselves. Bounded: once per silence episode, at most once a
+     * minute, never while pairing; if it doesn't help we stop and leave the manual button.
+     */
+    private fun autoFixLink() {
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (pairing || userDisconnected || autoFixedThisEpisode) return
+        if (now - lastAutoFixAt < 60_000) return
+        autoFixedThisEpisode = true
+        lastAutoFixAt = now
+        recoverLink()
     }
 
     fun lastSentLevel(): Int = lastSent

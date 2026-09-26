@@ -84,9 +84,10 @@ on a different network than your keys: re-import the keys, or pair it again.
 - **"No response from bulb (timeout)"** — the keys are probably for a different network;
   re-export them.
 - **"Decryption failed"** — keys match a different network or wrong device key.
-- **Connected, but brightness doesn't change** — the write isn't landing. Tap **Fix link**: this
-  install re-joins from a fresh mesh source address, clearing a stale replay-protection entry at the
-  bulb. If that doesn't help, the bulb is on a different network than your keys.
+- **Connected, but brightness doesn't change** — the write isn't landing. The app notices (two
+  unanswered changes) and re-joins under a fresh mesh source address by itself, which clears a stale
+  replay-protection entry at the bulb; the **Fix link** button does the same thing on demand. If
+  neither helps, the bulb is on a different network than your keys.
 - **Crashes** — the app shows the previous crash's stack trace on next start;
   open an issue with it, please.
 
