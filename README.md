@@ -10,86 +10,113 @@ and the only thing it ever talks to is the radio in the bulb.
 
 The phone joins the mesh as a proxy client and speaks the Bluetooth Mesh protocol
 itself (Nordic nRF Mesh library). Brightness is driven via the standard Mesh Light
-Lightness model.
+Lightness model. It can also **provision a factory-fresh bulb itself** — no nRF Mesh
+app, no Raspberry Pi, no other tool.
 
 ## What you need
 
 - An Android phone (Android 12+ recommended, Bluetooth LE required)
-- A BLE-mesh bulb that has already been **provisioned onto a mesh network**
-- The three mesh keys of that network (128-bit hex values): network key, app key,
-  and the bulb's device key
+- A BLE-mesh bulb (tested with the LEDVANCE Smart+)
+- Then either **pair it from the app** (if it's factory-fresh), or **import the keys**
+  of the network it already belongs to
 
-## Getting the keys (via a Raspberry Pi)
+## A. Pair a bulb from the app (no other tools needed)
 
-If you already have a provisioned bulb and a Raspberry Pi running the open-source
-[nRF Mesh python stack](https://github.com/NordicSemiconductor/Python-BLEMesh)
-(or any other mesh provisioner), the keys live in the provisioner's state file
-(typically a JSON blob containing `netKeys`, `appKeys`, and per-node
-`deviceKey`). Export the three values, and you're set.
+1. The bulb must be **unprovisioned**: power-cycle it 6 times quickly (off 1s, on 1s,
+   repeat) until it stops remembering its old network, or factory-reset it in whatever
+   app owns it now.
+2. Open aBulb → **⋯** (top right) → **Pair a new bulb** → *Start pairing*.
+3. The app creates a **brand-new mesh network owned by this phone**, runs the full
+   provisioning handshake over GATT, adds the app key and binds the light model. The
+   status line narrates each step.
+4. When it finishes, the keys are stored on the phone. Hand them to another phone with
+   **⋯ → Keys & sharing → Key file**.
 
-If your bulb is **not yet provisioned**, you can provision it with the official
-**nRF Mesh** mobile app (Android/iOS, free), then do the same key export from its
-network backup feature, or from any Pi-based provisioner. There are many guides
-online for "provisioning a generic BLE mesh bulb with nRF Mesh" — the short
-version: power-cycle the bulb, scan, find the "LEDVANCE ..." unprovisioned device,
-provision it with default settings, then export the network.
+Pairing does **not** steal a bulb that already belongs to a network — it only joins an
+unprovisioned one. A bulb that is in a network you can reach should be added with keys
+instead (option B).
 
-Note: bulb firmware is often picky — a power cycle (off → wait 5s → on) resets the
-provisioning state and is required after some failures.
+## B. Import the keys of an existing network
+
+You need three 128-bit hex values: the **network key**, the **app key**, and the
+bulb's **device key**. They live wherever the network was created:
+
+- **nRF Mesh app** (Android/iOS, free): open the network → Export → Network JSON.
+- **A Raspberry Pi or any other provisioner**: the state file (typically JSON with
+  `netKeys`, `appKeys` and a per-node `deviceKey`).
+- **Another aBulb install**: ⋯ → Keys & sharing → share the key file.
+
+Then on the phone: **⋯ → Keys & sharing** → paste the three values (or *Import file*
+an `abulb-keys.json`: `{"format":"abulb-keys-v1", "netKey":..., "appKey":...,
+"deviceKey":..., "mac":..., "bulbUnicast":...}`) → Save.
+
+Optional fields: the bulb's **MAC** (forces connecting to one specific device) and its
+**unicast address** (defaults to `0x0002`).
+
+Note: bulb firmware is often picky — a power cycle (off → wait 5s → on) resets a failed
+provisioning state.
 
 ## Installing
 
 1. Download the latest `app-release.apk` from the [Releases](../../releases) page.
 2. Install it (allow "install from unknown sources" when prompted).
-3. Open the app → tap **⋯** (top right) → **Keys & sharing** → paste the 3 keys by hand, or tap
-   **Import file** and pick an `abulb-keys.json` (`{"format":"abulb-keys-v1", "netKey":..., "appKey":...,
-   "deviceKey":..., "mac":..., "bulbUnicast":...}`). Optionally add the bulb's MAC and
-   unicast address (defaults to `0x0002`) → Save → restart the app.
-4. Power-cycle the bulb and make sure it's powered (it advertises the mesh proxy
-   only while powered).
-5. Tap **Connect**. The status shows *finding bulb… → connecting… → connected*,
-   then the bulb's current level appears and the slider controls it.
+3. Add the keys (option B) or pair the bulb (option A).
+4. Power-cycle the bulb and make sure it's powered — it advertises the mesh proxy only
+   while it has power.
+5. That's it: the app connects by itself on launch and the orb shows the bulb's current
+   level. Drag the slider or tap a preset to change it.
 
-The phone joins as its own mesh node — it picks its own source address on first run — so it coexists
-with your Pi/other controllers: sequence numbers are tracked per source address, so the Pi and the
-phone never fight over one counter.
+## Using it
+
+- **The orb is the readout** — the current level renders inside it, and it glows and
+  breathes while the bulb is connected.
+- **Slider** — drag for any level; it's sent live as you drag. **Presets** — off, ember,
+  low, max (they ramp rather than jump).
+- **Double-tap the orb** to toggle between off and the last level it was lit at.
+- **One button**, Connect / Disconnect. You'll rarely need it: the app connects on
+  launch and manages the radio itself.
+- **⋯** holds everything else: *Keys & sharing* (enter, import, share, clear keys),
+  *Pair a new bulb*, *Disconnect*, and *Help & diagnostics* — which shows the mesh
+  address this install is using and whether the bulb is answering.
 
 ## Two phones, one bulb
 
 Both can control it, with one caveat in each direction:
 
-- **Writes are not exclusive.** Any device holding the network + app keys can address the bulb, and
-  it acts on whatever arrives. Each aBulb install sends from its **own** mesh address (chosen on
-  first run), because the bulb keeps a *replay-protection entry per source address*: two installs
-  sharing an address — or one install whose sequence counter restarted — are silently ignored while
-  the app still reports *connected*.
-- **The BLE link is exclusive.** A bulb's GATT proxy generally accepts one connection at a time, so
-  two phones can't be attached to the same bulb simultaneously. aBulb manages this for you: it holds
-  the link while you're using the app, hands the radio back a few seconds after your last touch (and
-  immediately when the app goes to the background), and silently takes it again when you touch the
-  slider, a preset or the orb — applying the level you asked for as soon as the link is up. The
-  screen keeps reading *connected* throughout, because the app does have the bulb; only the radio is
-  shared. For genuinely simultaneous links, add a second always-powered mesh node (a second bulb, a
-  dev board) and have each phone attach to a different one.
+- **Writes are not exclusive.** Any device holding the network + app keys can address
+  the bulb, and it acts on the latest message it hears. Each aBulb install sends from its
+  **own** mesh address (chosen on first run), because the bulb keeps a *replay-protection
+  entry per source address*: two installs sharing an address — or one install whose
+  sequence counter restarted — are silently ignored while the app still reports
+  *connected*.
+- **The BLE link is exclusive.** A bulb's GATT proxy generally accepts one connection at
+  a time, so two phones can't be attached to the same bulb at once. aBulb handles that for
+  you: it holds the radio while you're actually changing the level, hands it back a few
+  seconds after your last change (and immediately when you leave the app), and silently
+  takes it back — re-applying whatever you asked for — the moment you change the level
+  again or return to the app. Browsing menus doesn't hold it, and the screen keeps
+  reading *connected* throughout: the app does have the bulb, only the radio is shared.
 
-If it says *connected* while the bulb ignores you, tap **Fix link** — that re-joins from a freshly
-chosen mesh address, which clears the replay-guard case. Still nothing? Then the bulb is very likely
-on a different network than your keys: re-import the keys, or pair it again.
+For genuinely simultaneous links, add a second always-powered mesh node (a second bulb,
+a dev board) and have each phone attach to a different one.
 
 ## Troubleshooting
 
-- **"Add your mesh keys"** — open the Keys dialog and paste the exported keys.
-- **"Proxy not found"** — the bulb isn't advertising the proxy; power-cycle it and keep
-  it powered. It advertises only while on.
+- **Bulb ignores your changes** — the write isn't landing. The app notices two unanswered
+  changes and re-joins under a fresh mesh source address by itself, which clears a stale
+  replay-protection entry at the bulb; **Fix link** in the app does the same thing on
+  demand. If neither helps, the bulb is very likely on a different network than your
+  keys: re-import the keys, or pair it again.
+- **"Proxy not found"** — the bulb isn't advertising the proxy; power-cycle it and keep it
+  powered. It advertises only while on.
 - **"No response from bulb (timeout)"** — the keys are probably for a different network;
   re-export them.
 - **"Decryption failed"** — keys match a different network or wrong device key.
-- **Connected, but brightness doesn't change** — the write isn't landing. The app notices (two
-  unanswered changes) and re-joins under a fresh mesh source address by itself, which clears a stale
-  replay-protection entry at the bulb; the **Fix link** button does the same thing on demand. If
-  neither helps, the bulb is on a different network than your keys.
-- **Crashes** — the app shows the previous crash's stack trace on next start;
-  open an issue with it, please.
+- **The phone says connected while another phone is using it** — expected: the radio is
+  handed back and re-taken automatically, and the other phone's changes are not undone.
+  Only one phone can hold the radio at a time.
+- **Crashes** — the app shows the previous crash's stack trace on next start; open an
+  issue with it, please.
 
 ## Building
 
@@ -100,14 +127,27 @@ sdk.dir=/path/to/Android/sdk   # local.properties
 ./gradlew :app:assembleRelease
 ```
 
+Two kinds of build come out of this repo:
+
+- **Keyless (what CI publishes).** Every push to `main` builds an APK as a workflow
+  artifact; every `v*` tag publishes a [release](../../releases) with the APK attached.
+  It contains no credentials — the user pairs a bulb or imports their own keys.
+- **Keyed (private builds).** Drop a `BakedKeys.kt` into
+  `app/src/main/java/com/example/bulb/` (it's gitignored) with `NET`, `APP`, `DEV`, `MAC`
+  and `UNICAST` constants and the build ships with those keys already in it — that's how
+  a "just install it and it works" copy for family is made. R8 keeps that class via
+  `app/proguard-rules.pro`, since it's only reached by reflection.
+
 Built against `no.nordicsemi.android:mesh:3.3.7` (Mesh Profile / provisioner stack)
 and `no.nordicsemi.android:ble:2.6.1` for the proxy GATT client. The proxy data
-characteristics used: 0x2ADD (write) / 0x2ADE (notify), service 0x1828.
+characteristics used: 0x2ADD (write) / 0x2ADE (notify), service 0x1828; provisioning
+uses service 0x1827.
 
 ## Privacy
 
 The app contains no analytics, no network permission, and talks only to the bulb's
-radio. Keys are stored in the app's private preferences on your device.
+radio. Keys are stored in the app's private preferences on your device, and the APK
+published here contains none of them.
 
 ## License
 
