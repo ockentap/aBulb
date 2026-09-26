@@ -62,4 +62,9 @@ object KeyStore {
             .putInt("unicast", k.bulbUnicast)
             .apply()
     }
+
+    /** Forget saved keys (baked-in keys, if any, come back — that's the local keyed build only). */
+    fun clear(ctx: Context) {
+        ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE).edit().clear().apply()
+    }
 }

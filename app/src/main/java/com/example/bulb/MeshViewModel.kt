@@ -42,6 +42,10 @@ class MeshViewModel(app: Application) : androidx.lifecycle.AndroidViewModel(app)
     private val ble: BleMeshManager = BleMeshManager(app)
     private val meshApi: MeshManagerApi = MeshManagerApi(app)
 
+    /** Small UI-side prefs (not credentials): last level commanded, so the orb isn't cold on launch. */
+    private val uiPrefs by lazy { app.getSharedPreferences("bulb_ui", Context.MODE_PRIVATE) }
+    private val prefsLastLevel get() = uiPrefs.getInt("lastLevel", -1).takeIf { it in 0..MeshConfig.LIGHTNESS_MAX }
+
     @Volatile private var network: MeshNetwork? = null
     @Volatile var keys: MeshKeys? = null
         private set
@@ -51,10 +55,14 @@ class MeshViewModel(app: Application) : androidx.lifecycle.AndroidViewModel(app)
     private var tidCounter = 0
     private var scanCb: android.bluetooth.le.ScanCallback? = null
     private var scanMode1828 = true
+    private var connectWatchdog: kotlinx.coroutines.Job? = null
 
     val connState = kotlinx.coroutines.flow.MutableStateFlow<ConnState>(ConnState.Idle)
-    val brightness = kotlinx.coroutines.flow.MutableStateFlow<Int?>(null) // raw 0..50
+    val brightness = kotlinx.coroutines.flow.MutableStateFlow<Int?>(prefsLastLevel) // raw 0..50
     val statusText = kotlinx.coroutines.flow.MutableStateFlow<String>("")
+
+    /** Level shown before the bulb has answered (may be stale — corrected on connect). */
+    fun rememberedLevel(): Int? = prefsLastLevel
 
     private fun st(v: String) { scope.launch(Dispatchers.Main.immediate) { statusText.value = v } }
     private fun cs(v: ConnState) { scope.launch(Dispatchers.Main.immediate) { connState.value = v } }
@@ -72,6 +80,8 @@ class MeshViewModel(app: Application) : androidx.lifecycle.AndroidViewModel(app)
                     }
                 } catch (e: Exception) { st("Addr assign failed: ${e.message}") }
                 network = n; imported = true
+                // If we connected before the import finished, the Get was skipped — catch up.
+                if (connState.value is ConnState.Ready) refreshState()
             }
             override fun onNetworkImportFailed(e: String) {
                 st("Import failed: $e")
@@ -163,11 +173,12 @@ class MeshViewModel(app: Application) : androidx.lifecycle.AndroidViewModel(app)
             override fun onDeviceConnecting(device: BluetoothDevice) { lastSeenMac = device.address; if (!pairing) cs(ConnState.Connecting) }
             override fun onDeviceConnected(device: BluetoothDevice) {}
             override fun onDeviceDisconnecting(device: BluetoothDevice) {}
-            override fun onDeviceDisconnected(device: BluetoothDevice) { if (!pairing) cs(ConnState.Idle) }
-            override fun onLinkLossOccurred(device: BluetoothDevice) { if (!pairing) cs(ConnState.Idle) }
+            override fun onDeviceDisconnected(device: BluetoothDevice) { connectWatchdog?.cancel(); if (!pairing) cs(ConnState.Idle) }
+            override fun onLinkLossOccurred(device: BluetoothDevice) { connectWatchdog?.cancel(); if (!pairing) cs(ConnState.Idle) }
             override fun onServicesDiscovered(device: BluetoothDevice, optionalServicesFound: Boolean) {}
             override fun onDeviceReady(device: BluetoothDevice) {
                 stopScan()
+                connectWatchdog?.cancel()
                 if (pairing) beginHandshake()
                 else { cs(ConnState.Ready); refreshState() }
             }
@@ -335,12 +346,28 @@ class MeshViewModel(app: Application) : androidx.lifecycle.AndroidViewModel(app)
             adapter.bondedDevices.firstOrNull { it.address.equals(keys?.mac, true) }
         } catch (e: SecurityException) { null }
         if (bonded != null) {
-            scope.launch(Dispatchers.Main) {
-                try { ble.startConnect(bonded) } catch (e: Exception) { st("Connect failed: ${e.message}") }
-            }
+            connectTo(bonded)
             return
         }
         startScan(adapter)
+    }
+
+    /** Connect to the proxy with a watchdog — the GATT link has no inherent timeout, so the UI must not hang. */
+    @SuppressLint("MissingPermission")
+    private fun connectTo(device: BluetoothDevice) {
+        scope.launch(Dispatchers.Main) {
+            try { ble.startConnect(device) } catch (e: Exception) { st("Connect failed: ${e.message}") }
+        }
+        connectWatchdog?.cancel()
+        connectWatchdog = scope.launch {
+            delay(30_000)
+            if (connState.value is ConnState.Connecting || connState.value is ConnState.Scanning) {
+                // Keep the reason in the status line: the disconnect below flips the state back to Idle.
+                st("No answer from the bulb — power-cycle it and retry")
+                cs(ConnState.Error("No answer from the bulb"))
+                try { ble.stop() } catch (_: Exception) {}
+            }
+        }
     }
 
     @SuppressLint("MissingPermission")
@@ -357,9 +384,7 @@ class MeshViewModel(app: Application) : androidx.lifecycle.AndroidViewModel(app)
                 val wantMac = keys?.mac?.takeIf { it.isNotBlank() }
                 if (wantMac != null && !d.address.equals(wantMac, true)) return
                 stopScan()
-                scope.launch(Dispatchers.Main) {
-                    try { ble.startConnect(d) } catch (e: Exception) { st("Connect failed: ${e.message}") }
-                }
+                connectTo(d)
             }
         }
         scanCb = cbs
@@ -381,6 +406,7 @@ class MeshViewModel(app: Application) : androidx.lifecycle.AndroidViewModel(app)
     }
 
     fun disconnect() {
+        connectWatchdog?.cancel()
         scope.launch(Dispatchers.Main) {
             try { ble.stop() } catch (_: Exception) {}
         }
@@ -427,6 +453,7 @@ class MeshViewModel(app: Application) : androidx.lifecycle.AndroidViewModel(app)
             try {
                 meshApi.createMeshPdu(keys?.bulbUnicast ?: MeshConfig.BULB_UNICAST, LightLightnessSet(key, clamped, nextTid()))
                 lastSent = clamped; lastSendAt = android.os.SystemClock.elapsedRealtime()
+                uiPrefs.edit().putInt("lastLevel", clamped).apply()
             } catch (e: Exception) { st("Create failed: ${e.message}") }
         }
     }

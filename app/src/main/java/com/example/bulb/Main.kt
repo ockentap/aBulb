@@ -37,9 +37,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
@@ -87,7 +89,9 @@ fun App(crash: String? = null, vm: MeshViewModel = viewModel()) {
     var showPair by remember { mutableStateOf(false) }
     var showExport by remember { mutableStateOf(false) }
     var showHelp by remember { mutableStateOf(false) }
-    val sliderPos = remember { mutableStateOf(0f) }
+    val sliderPos = remember {
+        mutableStateOf((vm.rememberedLevel() ?: 0).toFloat() / MeshConfig.LIGHTNESS_MAX)
+    }
     var dragging by remember { mutableStateOf(false) }
     val ctx = LocalContext.current
 
@@ -135,8 +139,10 @@ fun App(crash: String? = null, vm: MeshViewModel = viewModel()) {
         )
     ) {
         Surface(modifier = Modifier.fillMaxSize(), color = Night) {
-            Box(Modifier.fillMaxSize()) {
+            BoxWithConstraints(Modifier.fillMaxSize()) {
                 val glow = sliderPos.value
+                // Shrink the orb on short screens so the controls never get pushed off the bottom.
+                val orbSize = (maxHeight * 0.30f).coerceIn(120.dp, 210.dp)
                 Box(
                     Modifier
                         .fillMaxWidth()
@@ -156,10 +162,11 @@ fun App(crash: String? = null, vm: MeshViewModel = viewModel()) {
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
+                        .windowInsetsPadding(WindowInsets.safeDrawing)
                         .padding(horizontal = 28.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Spacer(Modifier.height(48.dp))
+                    Spacer(Modifier.height(16.dp))
                     Text("the bulb", fontSize = 15.sp, letterSpacing = 6.sp,
                         color = Color.White.copy(alpha = 0.45f))
                     Spacer(Modifier.height(6.dp))
@@ -172,7 +179,7 @@ fun App(crash: String? = null, vm: MeshViewModel = viewModel()) {
 
                     Spacer(Modifier.weight(0.06f))
 
-                    BulbOrb(level = sliderPos.value, connected = state is ConnState.Ready)
+                    BulbOrb(level = sliderPos.value, connected = state is ConnState.Ready, orbSize = orbSize)
 
                     Spacer(Modifier.weight(0.10f))
 
@@ -208,7 +215,7 @@ fun App(crash: String? = null, vm: MeshViewModel = viewModel()) {
                     ) {
                         listOf(0f to "off", 0.1f to "ember", 0.45f to "low", 1f to "max").forEach { (v, name) ->
                             FilterChip(
-                                selected = false,
+                                selected = abs(sliderPos.value - v) < 0.02f,
                                 onClick = {
                                     dragging = false
                                     val target = (v * MeshConfig.LIGHTNESS_MAX).roundToInt()
@@ -219,7 +226,9 @@ fun App(crash: String? = null, vm: MeshViewModel = viewModel()) {
                                 shape = RoundedCornerShape(50),
                                 colors = FilterChipDefaults.filterChipColors(
                                     containerColor = NightCard,
-                                    labelColor = Color.White.copy(alpha = 0.75f)
+                                    labelColor = Color.White.copy(alpha = 0.75f),
+                                    selectedContainerColor = AmberDeep,
+                                    selectedLabelColor = Night,
                                 )
                             )
                         }
@@ -323,12 +332,12 @@ private fun stateLabel(s: ConnState) = when (s) {
 
 private fun percentText(pos: Float, level: Int?): String {
     val pct = (pos * 100).roundToInt()
-    return if (pct == 0 && level == 0) "off" else "$pct%"
+    return if (pct <= 0) "off" else "$pct%"
 }
 
 /** Glowing bulb orb; breathing animation when lit. */
 @Composable
-private fun BulbOrb(level: Float, connected: Boolean) {
+private fun BulbOrb(level: Float, connected: Boolean, orbSize: Dp = 210.dp) {
     val infinite = rememberInfiniteTransition(label = "breathe")
     val pulse by infinite.animateFloat(
         initialValue = 0.92f, targetValue = 1.06f,
@@ -340,7 +349,7 @@ private fun BulbOrb(level: Float, connected: Boolean) {
     val animatedLevel by animateFloatAsState(level,
         animationSpec = tween(350, easing = FastOutSlowInEasing), label = "lvl")
 
-    val size = 210.dp
+    val size = orbSize
     Box(contentAlignment = Alignment.Center, modifier = Modifier.size(size + 80.dp)) {
         Box(
             Modifier
@@ -374,9 +383,9 @@ private fun BulbOrb(level: Float, connected: Boolean) {
                 )
         )
         Icon(
-            Icons.Default.Lightbulb, null,
+            Icons.Default.Lightbulb, contentDescription = "bulb",
             tint = Color.White.copy(alpha = 0.55f + 0.45f * animatedLevel),
-            modifier = Modifier.size(84.dp).scale(0.95f + 0.05f * animatedLevel)
+            modifier = Modifier.size(size * 0.4f).scale(0.95f + 0.05f * animatedLevel)
         )
     }
 }
@@ -395,7 +404,8 @@ private fun HelpDialog(onDismiss: () -> Unit) {
         "Trouble?",
         "    • Proxy not found → power-cycle the bulb and keep it on",
         "    • Timeout/Decryption failed → keys from a different network",
-        "    • This app only supports BLE mesh bulbs — not WiFi/cloud bulbs."
+        "    • This app only supports BLE mesh bulbs — not WiFi/cloud bulbs.",
+        "    aBulb ${MeshConfig.APP_VERSION} — keys stay on this phone, nothing is uploaded."
     )
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -422,11 +432,12 @@ private fun HelpDialog(onDismiss: () -> Unit) {
 @Composable
 private fun KeyDialog(onDismiss: () -> Unit) {
     val ctx = LocalContext.current
-    var net by remember { mutableStateOf("") }
-    var app by remember { mutableStateOf("") }
-    var dev by remember { mutableStateOf("") }
-    var mac by remember { mutableStateOf("") }
-    var uni by remember { mutableStateOf("0x0002") }
+    val saved = remember { KeyStore.load(ctx) }   // prefill with the keys currently in use
+    var net by remember { mutableStateOf(saved?.net ?: "") }
+    var app by remember { mutableStateOf(saved?.app ?: "") }
+    var dev by remember { mutableStateOf(saved?.dev ?: "") }
+    var mac by remember { mutableStateOf(saved?.mac ?: "") }
+    var uni by remember { mutableStateOf(saved?.let { String.format("0x%04X", it.bulbUnicast) } ?: "0x0002") }
     val filePicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
@@ -454,7 +465,10 @@ private fun KeyDialog(onDismiss: () -> Unit) {
         containerColor = NightCard,
         title = { Text("Mesh keys", color = Color.White) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())
+            ) {
                 Text("Paste the keys from your own provisioned network (see the README for how to export them from a Raspberry Pi).",
                     color = Color.White.copy(alpha = 0.5f), fontSize = 13.sp)
                 OutlinedTextField(net, { net = it }, label = { Text("Network key") },
@@ -475,21 +489,35 @@ private fun KeyDialog(onDismiss: () -> Unit) {
                     Text("Import file", color = Amber)
                 }
             TextButton(onClick = {
-                val uniOk = uni.toIntOrNull(16)?.let { it in 1..0x7FFF } == true ||
-                            uni.startsWith("0x") && uni.substring(2).toIntOrNull(16) != null
-                if (net.length == 32 && app.length == 32 && dev.length == 32 && uniOk) {
-                    val u = uni.removePrefix("0x").removePrefix("0X").toInt(16)
-                    KeyStore.save(ctx, MeshKeys(net, app, dev, mac, u))
-                    Toast.makeText(ctx, "Saved — restart app", Toast.LENGTH_SHORT).show()
-                    onDismiss()
-                } else {
-                    Toast.makeText(ctx, "Each key must be 32 hex chars", Toast.LENGTH_SHORT).show()
+                val n = net.trim().uppercase()
+                val a = app.trim().uppercase()
+                val d = dev.trim().uppercase()
+                val hex32 = Regex("^[0-9A-F]{32}$")
+                val u = uni.trim().removePrefix("0x").removePrefix("0X").toIntOrNull(16)
+                when {
+                    !hex32.matches(n) || !hex32.matches(a) || !hex32.matches(d) ->
+                        Toast.makeText(ctx, "Each key must be 32 hex chars (0-9, A-F)", Toast.LENGTH_SHORT).show()
+                    u == null || u !in 0x0001..0x7FFF ->
+                        Toast.makeText(ctx, "Unicast address must be 0001-7FFF, e.g. 0x0002", Toast.LENGTH_SHORT).show()
+                    else -> {
+                        KeyStore.save(ctx, MeshKeys(n, a, d, mac.trim().uppercase(), u))
+                        Toast.makeText(ctx, "Saved — restart app", Toast.LENGTH_SHORT).show()
+                        onDismiss()
+                    }
                 }
             }) { Text("Save", color = Amber) }
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel", color = Color.White.copy(alpha = 0.6f)) }
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(onClick = {
+                    KeyStore.clear(ctx)
+                    net = ""; app = ""; dev = ""; mac = ""; uni = "0x0002"
+                    Toast.makeText(ctx, "Keys cleared — restart app", Toast.LENGTH_SHORT).show()
+                    onDismiss()
+                }) { Text("Clear", color = Ember) }
+                TextButton(onClick = onDismiss) { Text("Cancel", color = Color.White.copy(alpha = 0.6f)) }
+            }
         }
     )
 }
