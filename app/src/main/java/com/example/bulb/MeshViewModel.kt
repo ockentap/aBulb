@@ -368,9 +368,13 @@ class MeshViewModel(app: Application) : androidx.lifecycle.AndroidViewModel(app)
         (getApplication<Application>().getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
 
     fun connectBulb() {
+        // Already on it (or holding the link)? Just extend the hold instead of stacking connects.
+        val s = connState.value
+        if (s is ConnState.Scanning || s is ConnState.Connecting || s is ConnState.Ready) {
+            touch(); return
+        }
         ensureImported()
         val ctx = getApplication<Application>()
-        st("")
         if (!hasPermissions(ctx)) { st("Grant Bluetooth permission first"); return }
         val adapter = adapter() ?: run {
             cs(ConnState.Error("No Bluetooth on this device")); return }
@@ -438,11 +442,14 @@ class MeshViewModel(app: Application) : androidx.lifecycle.AndroidViewModel(app)
         }
     }
 
+    /** Explicit disconnect: the user asked for it, so don't dress it up — and it shows "Connect". */
     fun disconnect() {
         connectWatchdog?.cancel()
+        idleJob?.cancel()
         scope.launch(Dispatchers.Main) {
             try { ble.stop() } catch (_: Exception) {}
         }
+        cs(ConnState.Idle)
     }
 
     // ---------- brightness ----------
@@ -497,13 +504,31 @@ class MeshViewModel(app: Application) : androidx.lifecycle.AndroidViewModel(app)
         if (connState.value !is ConnState.Ready) return
         idleJob = scope.launch {
             delay(MeshConfig.IDLE_RELEASE_MS)
-            if (connState.value is ConnState.Ready) {
-                // Don't bury a "the bulb never answered" complaint under a routine notice.
-                if (linkState.value != LinkState.NO_REPLY) st("Link released — touch to reconnect")
-                try { ble.stop() } catch (_: Exception) {}
-                cs(ConnState.Released)
-            }
+            releaseQuietly()
         }
+    }
+
+    /**
+     * Let the link go without telling the user anything: the app still "has" the bulb, it just
+     * isn't holding the radio. Another phone can take it, and we quietly take it back when the
+     * user comes back or touches something.
+     */
+    private fun releaseQuietly() {
+        if (connState.value !is ConnState.Ready) return
+        try { ble.stop() } catch (_: Exception) {}
+        cs(ConnState.Released)
+    }
+
+    /** App came back to the front (or launched): make sure the link is there, silently. */
+    fun onAppForeground() {
+        val s = connState.value
+        if (s is ConnState.Released || s is ConnState.Idle || s is ConnState.Error) connectBulb()
+    }
+
+    /** App went to the background: hand the radio back right away instead of waiting out the idle timer. */
+    fun onAppBackground() {
+        idleJob?.cancel()
+        releaseQuietly()
     }
 
     /** Touching the app while we're not connected means "connect and do what I asked". */
@@ -597,8 +622,15 @@ class MeshViewModel(app: Application) : androidx.lifecycle.AndroidViewModel(app)
             LinkState.NO_REPLY -> "BULB NEVER ANSWERED"
             LinkState.UNKNOWN -> "no write attempted yet"
         }
+        val link = when (connState.value) {
+            is ConnState.Ready -> "radio held"
+            is ConnState.Released -> "radio released (idle — normal)"
+            is ConnState.Idle -> "radio down"
+            is ConnState.Error -> "radio error"
+            else -> "linking"
+        }
         return "This install: ${LocalNode.describe(phoneAddr)} · bulb: " +
-            LocalNode.describe(keys?.bulbUnicast ?: MeshConfig.BULB_UNICAST) + " · $reply"
+            LocalNode.describe(keys?.bulbUnicast ?: MeshConfig.BULB_UNICAST) + " · $reply · $link"
     }
 
     /** BLE status codes worth naming — 19 is the bulb closing the link, not us. */

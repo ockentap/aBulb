@@ -64,12 +64,13 @@ Both can control it, with one caveat in each direction:
   sharing an address — or one install whose sequence counter restarted — are silently ignored while
   the app still reports *connected*.
 - **The BLE link is exclusive.** A bulb's GATT proxy generally accepts one connection at a time, so
-  two phones can't be attached to the same bulb simultaneously. aBulb handles this for you: it holds
-  the link for ~5 seconds after your last touch, then releases it ("tap to connect" — not an error),
-  and reconnects the moment you touch the slider, a preset or the orb, applying the level you asked
-  for as soon as the link is up. So both phones can be in use without anyone managing Disconnect.
-  For genuinely simultaneous links, add a second always-powered mesh node (a second bulb, a dev
-  board) and have each phone attach to a different one.
+  two phones can't be attached to the same bulb simultaneously. aBulb manages this for you: it holds
+  the link while you're using the app, hands the radio back a few seconds after your last touch (and
+  immediately when the app goes to the background), and silently takes it again when you touch the
+  slider, a preset or the orb — applying the level you asked for as soon as the link is up. The
+  screen keeps reading *connected* throughout, because the app does have the bulb; only the radio is
+  shared. For genuinely simultaneous links, add a second always-powered mesh node (a second bulb, a
+  dev board) and have each phone attach to a different one.
 
 If it says *connected* while the bulb ignores you, tap **Fix link** — that re-joins from a freshly
 chosen mesh address, which clears the replay-guard case. Still nothing? Then the bulb is very likely

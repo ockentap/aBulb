@@ -46,6 +46,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
@@ -97,6 +98,23 @@ fun App(crash: String? = null, vm: MeshViewModel = viewModel()) {
     val level by vm.brightness.collectAsState()
     val status by vm.statusText.collectAsState()
     val link by vm.linkState.collectAsState()
+    // The radio is handed back when idle, but the app still HAS the bulb — so the UI keeps saying
+    // connected, and the link is taken back silently whenever it's needed.
+    val online = state is ConnState.Ready || state is ConnState.Released
+
+    // Once the app has the bulb it keeps saying so, even while the radio is being re-taken in the
+    // background: a quiet reconnect is not news the user should have to read.
+    var hadBulb by remember { mutableStateOf(false) }
+    LaunchedEffect(state) {
+        when (state) {
+            is ConnState.Ready, is ConnState.Released -> hadBulb = true
+            is ConnState.Error, is ConnState.Pairing -> hadBulb = false
+            else -> {}
+        }
+    }
+    val visibleLabel =
+        if (hadBulb && (state is ConnState.Scanning || state is ConnState.Connecting)) "connected"
+        else stateLabel(state)
     var showKeys by remember { mutableStateOf(false) }      // keys + sharing, one dialog
     var showPair by remember { mutableStateOf(false) }
     var showHelp by remember { mutableStateOf(false) }
@@ -131,6 +149,21 @@ fun App(crash: String? = null, vm: MeshViewModel = viewModel()) {
             ))
             else perms.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION))
         }
+    }
+
+    // The radio is handed back when the app is idle or in the background; take it again silently
+    // whenever the app comes back to the front.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_START -> vm.onAppForeground()
+                androidx.lifecycle.Lifecycle.Event.ON_STOP -> vm.onAppBackground()
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     var showCrash by remember { mutableStateOf(crash != null) }
@@ -198,7 +231,7 @@ fun App(crash: String? = null, vm: MeshViewModel = viewModel()) {
                     Text("the bulb", fontSize = 15.sp, letterSpacing = 6.sp,
                         color = Color.White.copy(alpha = 0.45f))
                     Spacer(Modifier.height(6.dp))
-                    AnimatedContent(targetState = stateLabel(state), transitionSpec = {
+                    AnimatedContent(targetState = visibleLabel, transitionSpec = {
                         fadeIn(tween(250)) + slideInVertically(tween(250)) { it / 2 } togetherWith
                         fadeOut(tween(150)) + slideOutVertically(tween(150)) { -it / 2 }
                     }, label = "state") { s ->
@@ -209,7 +242,7 @@ fun App(crash: String? = null, vm: MeshViewModel = viewModel()) {
 
                     BulbOrb(
                         level = sliderPos.value,
-                        connected = state is ConnState.Ready,
+                        connected = online,
                         orbSize = orbSize,
                         label = percentText(sliderPos.value),
                         onDoubleTap = {
@@ -315,7 +348,7 @@ fun App(crash: String? = null, vm: MeshViewModel = viewModel()) {
 
                     Spacer(Modifier.weight(0.08f))
 
-                    val connected = state is ConnState.Ready
+                    val connected = online
                     FilledTonalButton(
                         onClick = {
                             if (connected) vm.disconnect()
@@ -355,7 +388,7 @@ fun App(crash: String? = null, vm: MeshViewModel = viewModel()) {
                 }
                 if (showSheet) {
                     OptionsSheet(
-                        connected = state is ConnState.Ready,
+                        connected = online,
                         onKeys = { showSheet = false; showKeys = true },
                         onPair = { showSheet = false; showPair = true },
                         onDisconnect = { showSheet = false; vm.disconnect() },
@@ -373,7 +406,9 @@ private fun stateLabel(s: ConnState) = when (s) {
     ConnState.Scanning -> "finding bulb…"
     ConnState.Connecting -> "connecting…"
     ConnState.Ready -> "connected"
-    ConnState.Released -> "tap to connect"
+    // The radio may be let go when idle, but the app still has the bulb — say so, and take the
+    // link back silently the moment it's needed. Not a user-facing state.
+    ConnState.Released -> "connected"
     is ConnState.Error -> "needs attention"
 }
 
@@ -483,8 +518,8 @@ private fun HelpDialog(diag: String, onDismiss: () -> Unit) {
         "    Tap ⋯ (top right) → Keys & sharing, paste the three values. Optional: bulb MAC (AA:BB:CC:...) to force connecting to a specific device, and its unicast address (usually 0x0002). Save and restart the app.",
         "4. Connect & control",
         "    Keep the bulb powered — it only advertises the BLE mesh proxy while powered. Tap Connect; the orb shows the live level and the slider drives it. Double-tap the orb to switch between off and your last level.",
-        "5. It lets go on purpose",
-        "    The bulb only accepts one phone at a time, so the link is released about 5 seconds after your last touch — that's the \"tap to connect\" state, not an error. Touch anything (slider, preset, orb) and it reconnects and applies what you asked for.",
+        "5. It shares the radio",
+        "    The bulb accepts one phone at a time, so the app hands the radio back a few seconds after your last touch (or the moment you leave the app) and silently takes it again when you touch anything or come back. The screen stays on connected throughout — your level lands as soon as the link is up, nothing to tap and nothing to fix.",
         "Also in ⋯:",
         "    Pair a new bulb (joins a factory-reset bulb to a new network), Disconnect, and this help page.",
         "Trouble?",
