@@ -34,6 +34,10 @@ sealed class ConnState {
     data class Error(val msg: String) : ConnState()
 }
 
+/** Whether the BULB has answered us. A live BLE link says nothing about whether writes land:
+ *  a mesh write is fire-and-forget, and the bulb silently drops anything it won't accept. */
+enum class LinkState { UNKNOWN, OK, NO_REPLY }
+
 class MeshViewModel(app: Application) : androidx.lifecycle.AndroidViewModel(app) {
 
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
@@ -56,10 +60,17 @@ class MeshViewModel(app: Application) : androidx.lifecycle.AndroidViewModel(app)
     private var scanCb: android.bluetooth.le.ScanCallback? = null
     private var scanMode1828 = true
     private var connectWatchdog: kotlinx.coroutines.Job? = null
+    private var ackWatch: kotlinx.coroutines.Job? = null
+    @Volatile private var awaitingAckSince = 0L
+    private var reconnectAfterImport = false
+
+    /** This install's own mesh source address — distinct per install, see LocalNode. */
+    private var phoneAddr: Int = LocalNode.address(app)
 
     val connState = kotlinx.coroutines.flow.MutableStateFlow<ConnState>(ConnState.Idle)
     val brightness = kotlinx.coroutines.flow.MutableStateFlow<Int?>(prefsLastLevel) // raw 0..50
     val statusText = kotlinx.coroutines.flow.MutableStateFlow<String>("")
+    val linkState = kotlinx.coroutines.flow.MutableStateFlow<LinkState>(LinkState.UNKNOWN)
 
     /** Level shown before the bulb has answered (may be stale — corrected on connect). */
     fun rememberedLevel(): Int? = prefsLastLevel
@@ -75,13 +86,19 @@ class MeshViewModel(app: Application) : androidx.lifecycle.AndroidViewModel(app)
             override fun onNetworkLoadFailed(e: String) { st("Load failed: $e") }
             override fun onNetworkImported(n: MeshNetwork) {
                 try {
-                    if (n.selectedProvisioner.provisionerAddress == null) {
-                        n.selectedProvisioner.assignProvisionerAddress(MeshConfig.PHONE_UNICAST)
+                    // Our own source address must win over whatever the database had committed:
+                    // messages are sent FROM the provisioner address, and the bulb replays-guards per
+                    // source, so a shared or reset address is silently ignored.
+                    if (n.getProvisionerAddress() != phoneAddr) {
+                        n.selectedProvisioner.assignProvisionerAddress(phoneAddr)
                     }
                 } catch (e: Exception) { st("Addr assign failed: ${e.message}") }
                 network = n; imported = true
                 // If we connected before the import finished, the Get was skipped — catch up.
-                if (connState.value is ConnState.Ready) refreshState()
+                if (reconnectAfterImport) {
+                    reconnectAfterImport = false
+                    scope.launch(Dispatchers.Main) { connectBulb() }
+                } else if (connState.value is ConnState.Ready) refreshState()
             }
             override fun onNetworkImportFailed(e: String) {
                 st("Import failed: $e")
@@ -151,6 +168,9 @@ class MeshViewModel(app: Application) : androidx.lifecycle.AndroidViewModel(app)
                     return
                 }
                 if (src == (keys?.bulbUnicast ?: MeshConfig.BULB_UNICAST) && message is LightLightnessStatus) {
+                    awaitingAckSince = 0L
+                    ackWatch?.cancel()
+                    if (linkState.value != LinkState.OK) linkState.value = LinkState.OK
                     br(message.presentLightness)
                     st("Bulb level: ${message.presentLightness}")
                     if (rampJob?.isActive != true) lastSent = message.presentLightness
@@ -186,7 +206,7 @@ class MeshViewModel(app: Application) : androidx.lifecycle.AndroidViewModel(app)
             override fun onBonded(device: BluetoothDevice) {}
             override fun onBondingFailed(device: BluetoothDevice) {}
             override fun onError(device: BluetoothDevice, message: String, errorCode: Int) {
-                cs(ConnState.Error(message))
+                cs(ConnState.Error(gattHint(errorCode, message)))
             }
             override fun onDeviceNotSupported(device: BluetoothDevice) {
                 cs(ConnState.Error("Device has no mesh service"))
@@ -454,7 +474,22 @@ class MeshViewModel(app: Application) : androidx.lifecycle.AndroidViewModel(app)
                 meshApi.createMeshPdu(keys?.bulbUnicast ?: MeshConfig.BULB_UNICAST, LightLightnessSet(key, clamped, nextTid()))
                 lastSent = clamped; lastSendAt = android.os.SystemClock.elapsedRealtime()
                 uiPrefs.edit().putInt("lastLevel", clamped).apply()
+                armAckWatch()
             } catch (e: Exception) { st("Create failed: ${e.message}") }
+        }
+    }
+
+    /** A write only counts if the bulb answers it: no LightLightnessStatus back means it never acted
+     *  on the message (wrong keys, or our source address is replay-guarded at the bulb). */
+    private fun armAckWatch() {
+        if (awaitingAckSince == 0L) awaitingAckSince = android.os.SystemClock.elapsedRealtime()
+        ackWatch?.cancel()
+        ackWatch = scope.launch {
+            delay(4_000)
+            if (awaitingAckSince != 0L && connState.value is ConnState.Ready) {
+                linkState.value = LinkState.NO_REPLY
+                st("The bulb isn't answering our writes — tap Fix link")
+            }
         }
     }
 
@@ -484,9 +519,48 @@ class MeshViewModel(app: Application) : androidx.lifecycle.AndroidViewModel(app)
         }
         keys = k
         scope.launch(meshThread) {
-            try { meshApi.importMeshNetworkJson(CdbBuilder.build(k)) }
+            try { meshApi.importMeshNetworkJson(CdbBuilder.build(k, phoneAddr)) }
             catch (e: Exception) { st("Import crashed: ${e.message}") }
         }
+    }
+
+    /**
+     * Replay protection is per source address: a wedged or shared address is what makes the bulb
+     * go quiet while the link looks fine. Rolling a fresh address fixes that case in one tap.
+     */
+    fun recoverLink() {
+        val ctx = getApplication<Application>()
+        val old = phoneAddr
+        phoneAddr = LocalNode.roll(ctx)
+        imported = false
+        awaitingAckSince = 0L
+        ackWatch?.cancel()
+        linkState.value = LinkState.UNKNOWN
+        lastSent = -1
+        st("Re-joined as ${LocalNode.describe(phoneAddr)} (was ${LocalNode.describe(old)})")
+        reconnectAfterImport = true
+        disconnect()
+        ensureImported()
+    }
+
+    /** One line for the Help dialog: who this install is, and whether the bulb replies. */
+    fun diagLine(): String {
+        val reply = when (linkState.value) {
+            LinkState.OK -> "bulb replies"
+            LinkState.NO_REPLY -> "BULB NEVER ANSWERED"
+            LinkState.UNKNOWN -> "no write attempted yet"
+        }
+        return "This install: ${LocalNode.describe(phoneAddr)} · bulb: " +
+            LocalNode.describe(keys?.bulbUnicast ?: MeshConfig.BULB_UNICAST) + " · $reply"
+    }
+
+    /** BLE status codes worth naming — 19 is the bulb closing the link, not us. */
+    private fun gattHint(code: Int, message: String): String = when (code) {
+        8 -> "No link to the bulb (timed out) — power-cycle it"
+        19 -> "The bulb closed the link — another controller may be holding its proxy"
+        22 -> "Link closed by this phone"
+        133 -> "BLE link failed (133) — power-cycle the bulb and retry"
+        else -> "$message (BLE $code)"
     }
 
     override fun onCleared() {

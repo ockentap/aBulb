@@ -87,6 +87,7 @@ fun App(crash: String? = null, vm: MeshViewModel = viewModel()) {
     val state by vm.connState.collectAsState()
     val level by vm.brightness.collectAsState()
     val status by vm.statusText.collectAsState()
+    val link by vm.linkState.collectAsState()
     var showKeys by remember { mutableStateOf(false) }
     var showPair by remember { mutableStateOf(false) }
     var showExport by remember { mutableStateOf(false) }
@@ -246,6 +247,15 @@ fun App(crash: String? = null, vm: MeshViewModel = viewModel()) {
                             textAlign = TextAlign.Center)
                     }
 
+                    // The link can be up while the bulb ignores us — offer the one-tap recovery.
+                    AnimatedVisibility(visible = link == LinkState.NO_REPLY) {
+                        OutlinedButton(
+                            onClick = { vm.recoverLink() },
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
+                            modifier = Modifier.padding(top = 6.dp)
+                        ) { Text("Fix link", fontSize = 13.sp) }
+                    }
+
                     Spacer(Modifier.weight(0.08f))
 
                     val connected = state is ConnState.Ready
@@ -305,7 +315,7 @@ fun App(crash: String? = null, vm: MeshViewModel = viewModel()) {
                     KeyDialog { showKeys = false }
                 }
                 if (showHelp) {
-                    HelpDialog { showHelp = false }
+                    HelpDialog(diag = vm.diagLine(), onDismiss = { showHelp = false })
                 }
                 if (showPair) {
                     PairConfirmDialog(
@@ -402,7 +412,7 @@ private fun BulbOrb(level: Float, connected: Boolean, orbSize: Dp = 210.dp) {
 }
 
 @Composable
-private fun HelpDialog(onDismiss: () -> Unit) {
+private fun HelpDialog(diag: String, onDismiss: () -> Unit) {
     val steps = listOf(
         "1. Provision the bulb first (one-off)",
         "    Power-cycle the bulb (off 5s, on). In the free nRF Mesh app: Scan → tap the unprovisioned LEDVANCE device → Provision with defaults → bind an App Key → add Generic Light model.",
@@ -416,6 +426,9 @@ private fun HelpDialog(onDismiss: () -> Unit) {
         "    • Proxy not found → power-cycle the bulb and keep it on",
         "    • Timeout/Decryption failed → keys from a different network",
         "    • This app only supports BLE mesh bulbs — not WiFi/cloud bulbs.",
+        "Two phones, one bulb?",
+        "    Each install writes from its own mesh address, so both can control the bulb — but only one of them can hold the BLE link to it at a time. If it says connected while brightness ignores you, tap Fix link (that re-joins from a fresh address).",
+        "    $diag",
         "    aBulb ${MeshConfig.APP_VERSION} — keys stay on this phone, nothing is uploaded."
     )
     AlertDialog(

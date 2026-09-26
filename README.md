@@ -50,8 +50,27 @@ provisioning state and is required after some failures.
 5. Tap **Connect**. The status shows *finding bulb… → connecting… → connected*,
    then the bulb's current level appears and the slider controls it.
 
-The phone joins as its own mesh node (address `0x0003` by default), so it can coexist
-with your Pi/other controllers — sequence numbers are tracked per source, no conflicts.
+The phone joins as its own mesh node — it picks its own source address on first run — so it coexists
+with your Pi/other controllers: sequence numbers are tracked per source address, so the Pi and the
+phone never fight over one counter.
+
+## Two phones, one bulb
+
+Both can control it, with one caveat in each direction:
+
+- **Writes are not exclusive.** Any device holding the network + app keys can address the bulb, and
+  it acts on whatever arrives. Each aBulb install sends from its **own** mesh address (chosen on
+  first run), because the bulb keeps a *replay-protection entry per source address*: two installs
+  sharing an address — or one install whose sequence counter restarted — are silently ignored while
+  the app still reports *connected*.
+- **The BLE link is exclusive.** A bulb's GATT proxy generally accepts one connection at a time, so
+  two phones can't be attached to the same bulb simultaneously. Take turns, or add a second
+  always-powered mesh node (a second bulb, a dev board) and have each phone attach to a different
+  one.
+
+If it says *connected* while the bulb ignores you, tap **Fix link** — that re-joins from a freshly
+chosen mesh address, which clears the replay-guard case. Still nothing? Then the bulb is very likely
+on a different network than your keys: re-import the keys, or pair it again.
 
 ## Troubleshooting
 
@@ -61,6 +80,9 @@ with your Pi/other controllers — sequence numbers are tracked per source, no c
 - **"No response from bulb (timeout)"** — the keys are probably for a different network;
   re-export them.
 - **"Decryption failed"** — keys match a different network or wrong device key.
+- **Connected, but brightness doesn't change** — the write isn't landing. Tap **Fix link**: this
+  install re-joins from a fresh mesh source address, clearing a stale replay-protection entry at the
+  bulb. If that doesn't help, the bulb is on a different network than your keys.
 - **Crashes** — the app shows the previous crash's stack trace on next start;
   open an issue with it, please.
 

@@ -7,7 +7,7 @@ import org.json.JSONObject
  *  given the secrets exported from the Raspberry Pi. */
 object CdbBuilder {
 
-    fun build(keys: MeshKeys): String {
+    fun build(keys: MeshKeys, phoneAddress: Int): String {
         val netKey = keys.net; val appKey = keys.app; val devKey = keys.dev
         val bulbUnicast = String.format("%04X", keys.bulbUnicast)
         val o = JSONObject()
@@ -54,7 +54,7 @@ object CdbBuilder {
             .put("UUID", MeshConfig.PROVISIONER_UUID)
             .put("name", MeshConfig.PROVISIONER_NAME)
             .put("deviceKey", MeshConfig.PROVISIONER_UUID.replace("-", "").uppercase())
-            .put("unicastAddress", String.format("%04X", MeshConfig.PHONE_UNICAST))
+            .put("unicastAddress", String.format("%04X", phoneAddress))
             .put("security", "secure")
             .put("configComplete", true)
             .put("cid", "052E")
@@ -66,7 +66,7 @@ object CdbBuilder {
             .put("netKeys", JSONArray().put(JSONObject().put("index", MeshConfig.NET_KEY_INDEX).put("updated", false)))
             .put("appKeys", JSONArray().put(JSONObject().put("index", MeshConfig.APP_KEY_INDEX).put("updated", false)))
             .put("elements", JSONArray().put(JSONObject()
-                .put("name", "Element: 0x0003")
+                .put("name", "Element: " + String.format("%04X", phoneAddress))
                 .put("location", "0001")
                 .put("models", JSONArray())))
 
