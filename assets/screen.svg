@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="390" height="780" viewBox="0 0 390 780">
+  <title>aBulb main screen</title>
+  <defs>
+    <radialGradient id="glow"><stop offset="0%" stop-color="#FFC468" stop-opacity="0.55"/><stop offset="50%" stop-color="#FF6B35" stop-opacity="0.25"/><stop offset="100%" stop-color="#FF6B35" stop-opacity="0"/></radialGradient>
+    <radialGradient id="glass" cx="42%" cy="38%" r="62%"><stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.80"/><stop offset="45%" stop-color="#FFC468" stop-opacity="0.95"/><stop offset="78%" stop-color="#FF6B35" stop-opacity="0.90"/><stop offset="100%" stop-color="#1D1D2B"/></radialGradient>
+    <linearGradient id="track" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#FF6B35"/><stop offset="60%" stop-color="#FFC468"/><stop offset="100%" stop-color="#FF9E2C"/></linearGradient>
+    <linearGradient id="band" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#FFC468" stop-opacity="0.33"/><stop offset="35%" stop-color="#FF6B35" stop-opacity="0.16"/><stop offset="100%" stop-color="#FF6B35" stop-opacity="0"/></linearGradient>
+  </defs>
+  <rect width="390" height="780" rx="28" fill="#0A0A12"/>
+  <rect width="390" height="330" rx="28" fill="url(#band)"/>
+  <circle cx="195" cy="250" r="130" fill="url(#glow)"/>
+  <circle cx="195" cy="250" r="95" fill="url(#glass)"/>
+  <g transform="translate(141,176)"><path d="M54,32 c-9.4,0 -17,7.6 -17,17 c0,6.6 3.8,12.3 9.3,15.1 c1.1,0.6 1.7,1.6 1.7,2.9 v2 h12 v-2 c0,-1.3 0.6,-2.3 1.7,-2.9 c5.5,-2.8 9.3,-8.5 9.3,-15.1 C71,39.6 63.4,32 54,32 z" fill="#0A0A12" fill-opacity="0.45"/></g>
+  <text x="195" y="284" font-size="40" fill="#0A0A12" fill-opacity="0.8" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif">100%</text>
+  <text x="195" y="49" font-size="15" letter-spacing="4" fill="#FFFFFF" fill-opacity="0.45" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif">the bulb</text>
+  <text x="195" y="86" font-size="20" fill="#FFC468" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif">connected</text>
+  <g fill="#FFFFFF" fill-opacity="0.55"><circle cx="352" cy="44" r="2.4"/><circle cx="360" cy="44" r="2.4"/><circle cx="368" cy="44" r="2.4"/></g>
+  <rect x="47" y="467" width="296" height="6" rx="3" fill="#FFFFFF" fill-opacity="0.10"/>
+  <rect x="47" y="467" width="296" height="6" rx="3" fill="url(#track)"/>
+  <circle cx="343" cy="470" r="11" fill="#FFC468"/>
+  <rect x="56" y="520" width="52" height="32" rx="16" fill="#1D1D2B"/>
+  <text x="82" y="541" font-size="13" fill="#FFFFFF" fill-opacity="0.75" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif">off</text>
+  <rect x="118" y="520" width="78" height="32" rx="16" fill="#1D1D2B"/>
+  <text x="157" y="541" font-size="13" fill="#FFFFFF" fill-opacity="0.75" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif">ember</text>
+  <rect x="206" y="520" width="58" height="32" rx="16" fill="#1D1D2B"/>
+  <text x="235" y="541" font-size="13" fill="#FFFFFF" fill-opacity="0.75" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif">low</text>
+  <rect x="274" y="520" width="60" height="32" rx="16" fill="#FF9E2C"/>
+  <text x="304" y="541" font-size="13" fill="#0A0A12" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif">max</text>
+  <rect x="47" y="700" width="296" height="52" rx="26" fill="#1D1D2B"/>
+  <text x="195" y="732" font-size="15" fill="#FFFFFF" fill-opacity="0.8" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif">Disconnect</text>
+</svg>
