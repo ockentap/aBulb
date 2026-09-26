@@ -30,11 +30,13 @@ import androidx.compose.animation.core.animateFloatAsState
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
@@ -350,18 +352,27 @@ private fun BulbOrb(level: Float, connected: Boolean, orbSize: Dp = 210.dp) {
         animationSpec = tween(350, easing = FastOutSlowInEasing), label = "lvl")
 
     val size = orbSize
+    // Explicit px radius: the default radial-gradient radius is measured to the *corners*, so the
+    // outer colour is still opaque where the circle cuts it off — a hard rim (and, blurred, a square).
+    val density = LocalDensity.current
+    val glowRadius = with(density) { (size + 70.dp).toPx() / 2f }
+
     Box(contentAlignment = Alignment.Center, modifier = Modifier.size(size + 80.dp)) {
         Box(
             Modifier
                 .size(size + 70.dp)
                 .scale(if (connected) pulse else 1f)
-                .blur(60.dp)
+                // Unbounded: the default Rectangle edge treatment clips the blur to a square.
+                .blur(60.dp, BlurredEdgeTreatment.Unbounded)
                 .background(
-                    Brush.radialGradient(listOf(
-                        Amber.copy(alpha = 0.55f * animatedLevel),
-                        Ember.copy(alpha = 0.25f * animatedLevel),
-                        Color.Transparent
-                    )),
+                    Brush.radialGradient(
+                        colors = listOf(
+                            Amber.copy(alpha = 0.55f * animatedLevel),
+                            Ember.copy(alpha = 0.25f * animatedLevel),
+                            Color.Transparent
+                        ),
+                        radius = glowRadius
+                    ),
                     CircleShape
                 )
         )
