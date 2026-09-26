@@ -30,4 +30,4 @@ jobs:
           draft: false
           body: |
             aBulb — keyless release build.
-            Install, then Keys → enter/export from nRF Mesh, or Pair a factory-reset bulb.
+            Install, then ⋯ → Keys & sharing to enter/import keys, or Pair a factory-reset bulb.
